@@ -96,15 +96,22 @@ server.py          ← 全部核心模块 + FastMCP（MCP 入口）
 ## 构建与测试命令
 
 ```bash
-# 安装（开发模式）
+# 安装（开发模式 — 在项目 .venv 中）
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 pip install -e ".[monitor]"    # 含资源监控（psutil）
 
 # CLI 使用
+zigtester scan --dir ~/works/2025/fixnet
+zigtester run zigfoundation --level unit
+zigtester run --all --level unit --report-format markdown
+zigtester run --all --level unit --parallel    # 多项目并行（各项目互不干扰）
+zigtester history zigfoundation all-tests
+
+# 或通过模块入口
 python -m zigtester scan --dir ~/works/2025/fixnet
 python -m zigtester run zigfoundation --level unit
-python -m zigtester run zigbox --report-format markdown
-python -m zigtester history zigfoundation all-tests
 
 # MCP Server 启动（供 Claude Code 调用）
 python -m zigtester.server

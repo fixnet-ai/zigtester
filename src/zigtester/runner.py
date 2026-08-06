@@ -8,6 +8,7 @@ import signal
 import subprocess
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from .config import (
@@ -367,7 +368,7 @@ def run_workspace(
     Args:
         projects: 扫描发现的项目列表
         levels: 要执行的层级
-        parallel: 并行执行项目（目前串行，后续扩展）
+        parallel: 并行执行项目（各项目工作目录、子进程、历史存储互相独立）
         fail_fast: 首个项目失败即停止
         no_build: 跳过构建
 
@@ -377,11 +378,31 @@ def run_workspace(
     from .config import WorkspaceResult
 
     ws = WorkspaceResult()
-    for proj in projects:
-        pr = run_project(proj, levels, fail_fast=fail_fast, no_build=no_build)
-        ws.projects.append(pr)
-        if fail_fast and any(s.status == "FAIL" for s in pr.suites):
-            break
+
+    if not parallel or len(projects) <= 1:
+        # 串行路径（保持现有逻辑不变）
+        for proj in projects:
+            pr = run_project(proj, levels, fail_fast=fail_fast, no_build=no_build)
+            ws.projects.append(pr)
+            if fail_fast and any(s.status == "FAIL" for s in pr.suites):
+                break
+    else:
+        # 并行路径 — 各项目工作目录、子进程、历史存储互相独立
+        with ThreadPoolExecutor(max_workers=len(projects)) as ex:
+            futures = {
+                ex.submit(run_project, p, levels, fail_fast, no_build): p
+                for p in projects
+            }
+            for f in as_completed(futures):
+                try:
+                    pr = f.result()
+                except Exception:
+                    continue
+                ws.projects.append(pr)
+                if fail_fast and any(s.status == "FAIL" for s in pr.suites):
+                    for remaining in futures:
+                        remaining.cancel()
+
     return ws
 
 

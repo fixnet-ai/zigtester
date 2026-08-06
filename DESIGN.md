@@ -398,9 +398,10 @@ class DependencyResolver:
     def detect_cycle(self, suites: list[SuiteConfig]) -> list[str] | None
 
 def run_project(project: DiscoveredProject, levels: list[str], 
-                fail_fast: bool) -> ProjectResult
+                fail_fast: bool, no_build: bool) -> ProjectResult
 def run_workspace(projects: list[DiscoveredProject], levels: list[str],
-                  parallel: bool) -> WorkspaceResult
+                  parallel: bool = False, fail_fast: bool = False,
+                  no_build: bool = False) -> WorkspaceResult
 
 # reporter.py
 class Reporter:

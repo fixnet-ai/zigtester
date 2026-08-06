@@ -110,6 +110,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     else:
         ws = run_workspace(
             target_projects, levels,
+            parallel=args.parallel,
             fail_fast=args.fail_fast,
             no_build=args.no_build,
         )
@@ -235,6 +236,8 @@ def main() -> None:
                        help="详细输出")
     p_run.add_argument("--fail-fast", action="store_true",
                        help="首个失败即停止")
+    p_run.add_argument("--parallel", action="store_true",
+                       help="并行执行多个项目（仅 --all 模式有效）")
 
     # ── history ───────────────────────────────────────────
     p_hist = sub.add_parser("history", help="查看性能历史")
