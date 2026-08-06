@@ -51,7 +51,16 @@ class MetricExtractor:
     def _parse_zig_test(stdout: str, exit_code: int) -> dict[str, float]:
         """解析 zig build test 输出。
 
-        格式: "X/Y passed; Z skipped" 或 "All X tests passed."
+        支持格式:
+          - "X/Y passed; Z skipped" (旧版 Zig 输出)
+          - "All X tests passed." (Zig 单文件测试)
+          - "X passed; Y skipped; Z failed." (Zig 0.14+)
+          - Zig 0.16 --listen=- TAP 协议 (无 test count 文本行)
+
+        当无 test count 文本行时由 exit_code 驱动判断:
+          exit_code=0 → 视为通过 (tests_total=1, tests_passed=1)
+          exit_code≠0 → 视为失败 (tests_total=1, tests_failed=1)
+        避免 fallthrough 正则误匹配日志中的随机数字。
         """
         result: dict[str, float] = {
             "exit_code": float(exit_code),
@@ -96,10 +105,12 @@ class MetricExtractor:
             result["tests_total"] = float(p + f + s)
             return result
 
-        # 匹配 "X passed; Y failed; Z skipped" (备用，仅匹配行内空白)
-        m_p = re.search(r"(\d+)[ \t]+passed", stdout)
-        m_f = re.search(r"(\d+)[ \t]+failed", stdout)
-        m_s = re.search(r"(\d+)[ \t]+skipped", stdout)
+        # 匹配 "X passed; Y failed; Z skipped" (备用)
+        # 使用 stricter 正则：仅匹配测试汇总行，而非日志中的随机数字
+        # 测试汇总行特征：以数字开头，"passed"/"failed"/"skipped" 是行中的主要词汇
+        m_p = re.search(r"^(\d+)[ \t]+passed", stdout, re.MULTILINE)
+        m_f = re.search(r"^(\d+)[ \t]+failed", stdout, re.MULTILINE)
+        m_s = re.search(r"^(\d+)[ \t]+skipped", stdout, re.MULTILINE)
         if m_p or m_f or m_s:
             p = int(m_p.group(1)) if m_p else 0
             f = int(m_f.group(1)) if m_f else 0
@@ -108,6 +119,16 @@ class MetricExtractor:
             result["tests_failed"] = float(f)
             result["tests_skipped"] = float(s)
             result["tests_total"] = float(p + f + s)
+            return result
+
+        # 无任何 test count 文本行 → 由 exit_code 驱动
+        # 用于 Zig 0.16 --listen=- TAP 协议等不输出传统测试汇总的格式
+        if exit_code != 0:
+            result["tests_total"] = 1.0
+            result["tests_failed"] = 1.0
+        else:
+            result["tests_total"] = 1.0
+            result["tests_passed"] = 1.0
 
         return result
 

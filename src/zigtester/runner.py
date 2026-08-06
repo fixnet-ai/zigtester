@@ -143,9 +143,13 @@ class TestExecutor:
         extractor = MetricExtractor(suite.parser, suite.metrics)
         result.metrics = extractor.extract(combined, exit_code)
 
-        # 判断状态
-        result.status = self._determine_status(exit_code, suite, result.metrics, snapshot)
-        result.message = self._build_message(result)
+        # 判断状态 — sudo 不可用时标记 SKIP 而非 FAIL
+        if exit_code != 0 and _is_sudo_failure(stderr):
+            result.status = "SKIP"
+            result.message = "sudo 不可用（无 TTY 或密码未配置）"
+        else:
+            result.status = self._determine_status(exit_code, suite, result.metrics, snapshot)
+            result.message = self._build_message(result)
 
         return result
 
@@ -404,6 +408,20 @@ def run_workspace(
                         remaining.cancel()
 
     return ws
+
+
+_SUDO_FAILURE_PATTERNS = [
+    "sudo: a password is required",
+    "sudo: no tty present",
+    "sudo: unable to",
+    "is not in the sudoers file",
+    "sudo: sorry",
+]
+
+
+def _is_sudo_failure(stderr: str) -> bool:
+    """检测 stderr 是否包含 sudo 权限失败信息。"""
+    return any(pat in stderr for pat in _SUDO_FAILURE_PATTERNS)
 
 
 def _run_build(build_command: str, work_dir: str) -> None:
