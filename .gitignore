@@ -18,8 +18,11 @@ venv/
 # History
 ~/.zigtester/
 
-# Claude Code
-.claude/
+# Claude Code 本地目录与规划文件 (不入库)
+.claude/**
+# 但 skills 是项目资产，需要入 git
+!.claude/skills/
+!.claude/skills/**
 
 # OS
 .DS_Store
