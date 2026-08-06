@@ -1,0 +1,36 @@
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# History
+~/.zigtester/
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
+
+# Linux
+.directory
+.Trash-*
+
+# Playwright MCP temp files
+.playwright-mcp/

@@ -1,0 +1,352 @@
+"""配置解析与校验 — YAML 解析、数据模型、模板生成。"""
+
+from __future__ import annotations
+
+import os
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+# ── 数据模型 ──────────────────────────────────────────────
+
+DEFAULT_TIMEOUT = 120
+VALID_LEVELS = ("unit", "functional", "performance", "stress")
+VALID_PARSERS = ("zig_test", "line_count", "test_protocols", "bench", "custom")
+VALID_STATUSES = ("PASS", "FAIL", "SKIP", "ERROR")
+
+
+@dataclass
+class MetricDef:
+    """性能指标定义 — 从 stdout 提取的正则模式。"""
+    name: str
+    pattern: str       # 正则，含一个捕获组
+
+
+@dataclass
+class Threshold:
+    """阈值约束 — 可选 min/max，违反时套件标记为 FAIL。"""
+    min: float | None = None
+    max: float | None = None
+
+
+@dataclass
+class ResourceLimits:
+    """资源上限 — 超限时记入告警。"""
+    memory_mb: float | None = None
+    fd_count: int | None = None
+    cpu_percent: float | None = None
+
+
+@dataclass
+class ResourceSnapshot:
+    """资源采样快照 — monitor.py 产出。"""
+    pid: int = 0
+    peak_memory_mb: float = 0.0
+    avg_memory_mb: float = 0.0
+    peak_fd_count: int = 0
+    avg_fd_count: float = 0.0
+    peak_cpu_pct: float = 0.0
+    avg_cpu_pct: float = 0.0
+    sample_count: int = 0
+
+
+@dataclass
+class ProjectSettings:
+    """项目全局设置。"""
+    work_dir: str = "."
+    build_command: str | None = None
+    timeout_default: int = 120
+    env: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class SuiteConfig:
+    """单个测试套件配置。"""
+    name: str
+    command: str
+    timeout: int = DEFAULT_TIMEOUT
+    sudo: bool = False
+    parser: str = "line_count"
+    depends_on: list[str] = field(default_factory=list)
+    env: dict[str, str] = field(default_factory=dict)
+    metrics: list[MetricDef] = field(default_factory=list)
+    thresholds: dict[str, Threshold] = field(default_factory=dict)
+    resource_limits: ResourceLimits | None = None
+
+    @property
+    def qualified_name(self) -> str:
+        return self.name
+
+
+@dataclass
+class LevelConfig:
+    """测试层级配置 — 包含多个 SuiteConfig。"""
+    suites: list[SuiteConfig] = field(default_factory=list)
+
+
+@dataclass
+class ProjectConfig:
+    """项目完整配置。"""
+    project: str
+    description: str = ""
+    settings: ProjectSettings = field(default_factory=ProjectSettings)
+    levels: dict[str, LevelConfig] = field(default_factory=dict)
+
+
+@dataclass
+class SuiteResult:
+    """单套件执行结果。"""
+    suite_name: str
+    level: str
+    status: str = "SKIP"
+    duration_ms: float = 0.0
+    exit_code: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+    metrics: dict[str, float] = field(default_factory=dict)
+    resource_peak: ResourceSnapshot = field(default_factory=ResourceSnapshot)
+    message: str = ""
+
+
+@dataclass
+class ProjectResult:
+    """项目执行结果。"""
+    project: str
+    path: str
+    suites: list[SuiteResult] = field(default_factory=list)
+    started_at: float = 0.0
+    finished_at: float = 0.0
+
+
+@dataclass
+class WorkspaceResult:
+    """跨项目聚合结果。"""
+    projects: list[ProjectResult] = field(default_factory=list)
+
+
+@dataclass
+class Regression:
+    """回归检测结果。"""
+    metric: str
+    current: float
+    baseline_avg: float
+    pct_change: float
+    is_regression: bool
+
+
+# ── YAML 解析 ─────────────────────────────────────────────
+
+def _env_subst(value: str) -> str:
+    """替换字符串中的 ${VAR} 环境变量。"""
+    def _repl(m: re.Match) -> str:
+        return os.environ.get(m.group(1), "")
+    return re.sub(r"\$\{(\w+)\}", _repl, value)
+
+
+def _parse_metric_def(raw: dict) -> MetricDef:
+    return MetricDef(
+        name=str(raw["name"]),
+        pattern=str(raw["pattern"]),
+    )
+
+
+def _parse_threshold(raw: dict) -> Threshold:
+    return Threshold(
+        min=float(raw["min"]) if "min" in raw else None,
+        max=float(raw["max"]) if "max" in raw else None,
+    )
+
+
+def _parse_resource_limits(raw: dict | None) -> ResourceLimits | None:
+    if raw is None:
+        return None
+    return ResourceLimits(
+        memory_mb=float(raw["memory_mb"]) if "memory_mb" in raw else None,
+        fd_count=int(raw["fd_count"]) if "fd_count" in raw else None,
+        cpu_percent=float(raw["cpu_percent"]) if "cpu_percent" in raw else None,
+    )
+
+
+def _parse_suite(raw: dict, global_settings: ProjectSettings) -> SuiteConfig:
+    """解析单个套件配置，全局设置作为默认值。"""
+    timeout = raw.get("timeout", global_settings.timeout_default)
+    # 合并全局 env 和套件 env（套件优先）
+    env = dict(global_settings.env)
+    env.update(raw.get("env", {}))
+
+    metrics = [_parse_metric_def(m) for m in raw.get("metrics", [])]
+    thresholds = {
+        k: _parse_threshold(v) if isinstance(v, dict) else v
+        for k, v in raw.get("thresholds", {}).items()
+    }
+
+    return SuiteConfig(
+        name=str(raw["name"]),
+        command=_env_subst(str(raw["command"])),
+        timeout=int(timeout),
+        sudo=bool(raw.get("sudo", False)),
+        parser=str(raw.get("parser", "line_count")),
+        depends_on=[str(d) for d in raw.get("depends_on", [])],
+        env=env,
+        metrics=metrics,
+        thresholds=thresholds,
+        resource_limits=_parse_resource_limits(raw.get("resource_limits")),
+    )
+
+
+def _parse_settings(raw: dict | None) -> ProjectSettings:
+    if raw is None:
+        return ProjectSettings()
+    return ProjectSettings(
+        work_dir=str(raw.get("work_dir", ".")),
+        build_command=raw.get("build_command"),
+        timeout_default=int(raw.get("timeout_default", DEFAULT_TIMEOUT)),
+        env={str(k): str(v) for k, v in raw.get("env", {}).items()},
+    )
+
+
+def parse_config(path: str) -> ProjectConfig:
+    """解析 zigtester.yaml 文件，返回 ProjectConfig。
+
+    未提供值使用合理默认值填充。
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f)
+
+    if raw is None:
+        raise ValueError(f"配置文件为空: {path}")
+
+    project = str(raw["project"])
+    description = str(raw.get("description", ""))
+    settings = _parse_settings(raw.get("settings"))
+
+    levels: dict[str, LevelConfig] = {}
+    raw_levels = raw.get("levels", {})
+    for level_name in VALID_LEVELS:
+        suite_list = raw_levels.get(level_name, [])
+        if suite_list is None:
+            suite_list = []
+        suites = [_parse_suite(s, settings) for s in suite_list]
+        levels[level_name] = LevelConfig(suites=suites)
+
+    return ProjectConfig(
+        project=project,
+        description=description,
+        settings=settings,
+        levels=levels,
+    )
+
+
+# ── 校验 ──────────────────────────────────────────────────
+
+def validate_config(raw: dict) -> list[str]:
+    """校验配置字典，返回错误信息列表（空列表 = 通过）。"""
+    errors: list[str] = []
+
+    if not isinstance(raw, dict):
+        return ["配置必须是 dict/object"]
+
+    # project
+    if "project" not in raw:
+        errors.append("缺少必填字段: project")
+    else:
+        p = raw["project"]
+        if not isinstance(p, str) or not re.match(r"^[a-z][a-z0-9_-]*$", p):
+            errors.append(f"project 格式无效: {p!r}，需满足 ^[a-z][a-z0-9_-]*$")
+
+    # levels
+    if "levels" not in raw:
+        errors.append("缺少必填字段: levels")
+    else:
+        lv = raw["levels"]
+        if not isinstance(lv, dict):
+            errors.append("levels 必须是 dict/object")
+        else:
+            for level_name in lv:
+                if level_name not in VALID_LEVELS:
+                    errors.append(
+                        f"未知层级: {level_name!r}，有效值: {', '.join(VALID_LEVELS)}"
+                    )
+                suites = lv[level_name]
+                if not isinstance(suites, list):
+                    errors.append(f"levels.{level_name} 必须是数组")
+                    continue
+                for i, suite in enumerate(suites):
+                    if not isinstance(suite, dict):
+                        errors.append(f"levels.{level_name}[{i}] 必须是 dict/object")
+                        continue
+                    if "name" not in suite:
+                        errors.append(f"levels.{level_name}[{i}] 缺少 name")
+                    if "command" not in suite:
+                        errors.append(f"levels.{level_name}[{i}] 缺少 command")
+                    parser = suite.get("parser", "line_count")
+                    if parser not in VALID_PARSERS:
+                        errors.append(
+                            f"levels.{level_name}[{i}].parser 无效: {parser!r}，"
+                            f"有效值: {', '.join(VALID_PARSERS)}"
+                        )
+
+    # settings (可选)
+    if "settings" in raw:
+        s = raw["settings"]
+        if not isinstance(s, dict):
+            errors.append("settings 必须是 dict/object")
+
+    return errors
+
+
+# ── 模板生成 ──────────────────────────────────────────────
+
+_TEMPLATE = """# zigtester 测试配置 — 自动生成
+# 项目标识
+project: {project_name}
+description: ""
+
+# 全局设置
+settings:
+  work_dir: "."
+  build_command: "zig build"     # 可选：测试前自动构建
+  timeout_default: 120            # 默认超时（秒）
+  # env:                         # 全局环境变量
+  #   ZIG_EXE: zig
+
+# 测试层级
+levels:
+  unit:
+    - name: "all-tests"
+      command: "zig build test"
+      parser: zig_test
+      timeout: 120
+
+  # functional:
+  #   - name: "smoke-test"
+  #     command: "python3 tests/test_smoke.py"
+  #     timeout: 60
+
+  # performance:
+  #   - name: "bench-baseline"
+  #     command: "python3 tests/test_bench.py -c 10 -n 100"
+  #     timeout: 120
+  #     metrics:
+  #       - name: throughput
+  #         pattern: "吞吐: ([0-9.]+) req/s"
+  #     thresholds:
+  #       throughput:
+  #         min: 100
+
+  # stress:
+  #   - name: "concurrency-stress"
+  #     command: "python3 tests/test_bench.py -c 50 -n 1000"
+  #     timeout: 300
+  #     resource_limits:
+  #       memory_mb: 200
+  #       fd_count: 500
+"""
+
+
+def generate_template(project_name: str) -> str:
+    """为项目生成初始 zigtester.yaml 内容。"""
+    return _TEMPLATE.format(project_name=project_name)

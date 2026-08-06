@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/fixnet-ai/zigtester/blob/main/schemas/zigtester.schema.json",
+  "title": "zigtester 配置",
+  "description": "zigtester.yaml 配置文件 JSON Schema",
+  "type": "object",
+  "required": ["project", "levels"],
+  "properties": {
+    "project": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "description": "项目标识"
+    },
+    "description": {
+      "type": "string",
+      "description": "项目描述"
+    },
+    "settings": {
+      "type": "object",
+      "description": "全局设置",
+      "properties": {
+        "work_dir": {
+          "type": "string",
+          "default": ".",
+          "description": "工作目录（默认配置文件所在目录）"
+        },
+        "build_command": {
+          "type": "string",
+          "description": "测试前自动构建命令"
+        },
+        "timeout_default": {
+          "type": "integer",
+          "default": 120,
+          "minimum": 1,
+          "description": "默认超时（秒）"
+        },
+        "env": {
+          "type": "object",
+          "description": "全局环境变量",
+          "additionalProperties": {"type": "string"}
+        }
+      }
+    },
+    "levels": {
+      "type": "object",
+      "description": "测试层级",
+      "properties": {
+        "unit":        {"$ref": "#/$defs/level"},
+        "functional":  {"$ref": "#/$defs/level"},
+        "performance": {"$ref": "#/$defs/level"},
+        "stress":      {"$ref": "#/$defs/level"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "level": {
+      "type": "array",
+      "description": "测试层级 — 包含多个套件",
+      "items": {"$ref": "#/$defs/suite"}
+    },
+    "suite": {
+      "type": "object",
+      "required": ["name", "command"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "description": "套件唯一标识"
+        },
+        "command": {
+          "type": "string",
+          "description": "执行命令"
+        },
+        "timeout": {
+          "type": "integer",
+          "default": 120,
+          "minimum": 1,
+          "description": "超时秒数"
+        },
+        "sudo": {
+          "type": "boolean",
+          "default": false,
+          "description": "是否需要 sudo"
+        },
+        "parser": {
+          "type": "string",
+          "enum": ["zig_test", "line_count", "test_protocols", "bench", "custom"],
+          "default": "line_count",
+          "description": "输出解析器"
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "依赖套件名列表"
+        },
+        "env": {
+          "type": "object",
+          "description": "套件级环境变量（覆盖全局）",
+          "additionalProperties": {"type": "string"}
+        },
+        "metrics": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/metric_def"},
+          "description": "性能指标定义"
+        },
+        "thresholds": {
+          "type": "object",
+          "description": "阈值约束",
+          "additionalProperties": {"$ref": "#/$defs/threshold"}
+        },
+        "resource_limits": {
+          "type": "object",
+          "description": "资源上限",
+          "properties": {
+            "memory_mb": {"type": "number", "minimum": 0},
+            "fd_count": {"type": "integer", "minimum": 0},
+            "cpu_percent": {"type": "number", "minimum": 0}
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "metric_def": {
+      "type": "object",
+      "required": ["name", "pattern"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "指标名称"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "正则表达式，含一个捕获组"
+        }
+      }
+    },
+    "threshold": {
+      "type": "object",
+      "properties": {
+        "min": {"type": "number", "description": "最小值（低于此值 FAIL）"},
+        "max": {"type": "number", "description": "最大值（高于此值 FAIL）"}
+      }
+    }
+  }
+}
