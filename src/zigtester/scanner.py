@@ -44,7 +44,7 @@ def _scan_dir(root: Path, max_depth: int = 3) -> list[Path]:
     found: list[Path] = []
     # 跳过隐藏目录和常用非项目目录
     skip = {".git", ".claude", ".codegraph", "node_modules", "__pycache__",
-            ".venv", "venv", "vendor", "zig-cache", "zig-out"}
+            ".venv", "venv", "vendor", "zig-cache", "zig-out", "zigtester"}
 
     def _walk(current: Path, depth: int) -> None:
         if depth > max_depth:

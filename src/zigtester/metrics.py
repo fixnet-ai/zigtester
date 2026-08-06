@@ -62,7 +62,7 @@ class MetricExtractor:
         }
 
         # 匹配 "123/125 passed; 2 skipped"
-        m = re.search(r"(\d+)/(\d+)\s+passed\s*;\s*(\d+)\s+skipped", stdout)
+        m = re.search(r"(\d+)/(\d+)[ \t]+passed[ \t]*;[ \t]*(\d+)[ \t]+skipped", stdout)
         if m:
             passed = int(m.group(1))
             total = int(m.group(2))
@@ -74,7 +74,7 @@ class MetricExtractor:
             return result
 
         # 匹配 "All X tests passed."
-        m = re.search(r"All\s+(\d+)\s+tests?\s+passed", stdout)
+        m = re.search(r"All[ \t]+(\d+)[ \t]+tests?[ \t]+passed", stdout)
         if m:
             total = int(m.group(1))
             result["tests_passed"] = float(total)
@@ -83,7 +83,7 @@ class MetricExtractor:
 
         # 匹配 "X passed; Y skipped; Z failed." (Zig 0.14+ 格式)
         m = re.search(
-            r"(\d+)\s+passed\s*;\s*(\d+)\s+skipped\s*;\s*(\d+)\s+failed",
+            r"(\d+)[ \t]+passed[ \t]*;[ \t]*(\d+)[ \t]+skipped[ \t]*;[ \t]*(\d+)[ \t]+failed",
             stdout,
         )
         if m:
@@ -96,10 +96,10 @@ class MetricExtractor:
             result["tests_total"] = float(p + f + s)
             return result
 
-        # 匹配 "X passed; Y failed; Z skipped" (备用)
-        m_p = re.search(r"(\d+)\s+passed", stdout)
-        m_f = re.search(r"(\d+)\s+failed", stdout)
-        m_s = re.search(r"(\d+)\s+skipped", stdout)
+        # 匹配 "X passed; Y failed; Z skipped" (备用，仅匹配行内空白)
+        m_p = re.search(r"(\d+)[ \t]+passed", stdout)
+        m_f = re.search(r"(\d+)[ \t]+failed", stdout)
+        m_s = re.search(r"(\d+)[ \t]+skipped", stdout)
         if m_p or m_f or m_s:
             p = int(m_p.group(1)) if m_p else 0
             f = int(m_f.group(1)) if m_f else 0
