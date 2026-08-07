@@ -8,8 +8,6 @@ config:
   echo_port: 13333
   # 协议 inbound 端口
   mixed_port: 2080
-  socks_port: 2081
-  http_port: 2082
   dns_direct_port: 5354
   ss_port: 8388
   trojan_port: 9443

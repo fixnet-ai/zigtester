@@ -28,9 +28,7 @@
 //   Salamander:      salamander-password
 //
 // 端口分配:
-//   :2080  mixed       — SOCKS5 + HTTP 代理
-//   :2081  socks       — 纯 SOCKS5
-//   :2082  http        — 纯 HTTP
+//   :2080  mixed       — SOCKS5 + HTTP 代理（已含两者，无需独立 socks/http inbound）
 //   :5354  direct(UDP) — DNS 转发 → 223.5.5.5:53
 //   :8388  shadowsocks — SS 2022 (2022-blake3-aes-128-gcm)
 //   :9443  trojan      — Trojan (TLS)
@@ -59,18 +57,6 @@
       "tag": "mixed-in",
       "listen": "127.0.0.1",
       "listen_port": 2080
-    },
-    {
-      "type": "socks",
-      "tag": "socks-in",
-      "listen": "127.0.0.1",
-      "listen_port": 2081
-    },
-    {
-      "type": "http",
-      "tag": "http-in",
-      "listen": "127.0.0.1",
-      "listen_port": 2082
     },
     {
       "type": "direct",
