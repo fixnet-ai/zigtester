@@ -7,7 +7,9 @@
 // 使用方式:
 //   1. zigtester 插件自动启动
 //   2. 手动: cd plugins/sing-box && sing-box run -c configs/test_server.json
-//   3. API: curl http://127.0.0.1:9090/version（健康检查）
+//   3. API: curl http://127.0.0.1:9090/version 或 curl http://[::1]:9090/version
+//
+// 双栈: 所有 inbound 统一 listen "::" — Linux 和 macOS 均可同时接受 IPv4/IPv6 连接。
 //
 // 注意: sing-box Clash API (PUT /configs) 只接受 Clash 格式配置，
 //       不支持原生格式热重载。需要切换配置时直接重启 sing-box。
@@ -15,7 +17,7 @@
 // 插件互动架构:
 //   local-echo 插件 (TCP :13333, DNS :53)
 //     ↑ direct outbound
-//   sing-box (本配置 — 12 协议 inbound)
+//   sing-box (本配置 — 10 协议 inbound，双栈 :: 同时支持 IPv4/IPv6)
 //     ↑ 各协议
 //   测试客户端 (zigbox/zigoutbounds ProtocolClient)
 //
@@ -55,13 +57,13 @@
     {
       "type": "mixed",
       "tag": "mixed-in",
-      "listen": "127.0.0.1",
+      "listen": "::",
       "listen_port": 2080
     },
     {
       "type": "direct",
       "tag": "dns-in",
-      "listen": "127.0.0.1",
+      "listen": "::",
       "listen_port": 5354,
       "network": "udp",
       "override_address": "223.5.5.5",
@@ -70,7 +72,7 @@
     {
       "type": "shadowsocks",
       "tag": "ss-in",
-      "listen": "127.0.0.1",
+      "listen": "::",
       "listen_port": 8388,
       "method": "2022-blake3-aes-128-gcm",
       "password": "cec3oZAgAaBi/F69ALSVgQ=="
@@ -78,7 +80,7 @@
     {
       "type": "trojan",
       "tag": "trojan-in",
-      "listen": "127.0.0.1",
+      "listen": "::",
       "listen_port": 9443,
       "users": [
         {
@@ -95,7 +97,7 @@
     {
       "type": "hysteria2",
       "tag": "hysteria2-in",
-      "listen": "127.0.0.1",
+      "listen": "::",
       "listen_port": 10443,
       "users": [
         {
@@ -112,7 +114,7 @@
     {
       "type": "vmess",
       "tag": "vmess-in",
-      "listen": "127.0.0.1",
+      "listen": "::",
       "listen_port": 16800,
       "users": [
         {
@@ -125,7 +127,7 @@
     {
       "type": "vless",
       "tag": "vless-in",
-      "listen": "127.0.0.1",
+      "listen": "::",
       "listen_port": 16801,
       "users": [
         {
@@ -143,7 +145,7 @@
     {
       "type": "hysteria2",
       "tag": "hysteria2-alt-in",
-      "listen": "127.0.0.1",
+      "listen": "::",
       "listen_port": 16802,
       "users": [
         {
@@ -160,7 +162,7 @@
     {
       "type": "tuic",
       "tag": "tuic-in",
-      "listen": "127.0.0.1",
+      "listen": "::",
       "listen_port": 16803,
       "users": [
         {
@@ -178,7 +180,7 @@
     {
       "type": "hysteria2",
       "tag": "hysteria2-salamander-in",
-      "listen": "127.0.0.1",
+      "listen": "::",
       "listen_port": 16804,
       "users": [
         {
