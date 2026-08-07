@@ -1,0 +1,221 @@
+// sing-box 统一测试服务器配置
+//
+// 用途: 为 fixnet 生态所有项目的协议测试提供单一参考实现。
+//       合并了原 singbox_test.json 和 singbox_all_inbounds.json，
+//       两个 hysteria2 端口共存（10443 主 / 16802 副），消除端口冲突。
+//
+// 使用方式:
+//   1. zigtester 插件自动启动
+//   2. 手动: cd plugins/sing-box && sing-box run -c configs/test_server.json
+//   3. API: curl http://127.0.0.1:9090/version（健康检查）
+//
+// 注意: sing-box Clash API (PUT /configs) 只接受 Clash 格式配置，
+//       不支持原生格式热重载。需要切换配置时直接重启 sing-box。
+//
+// 插件互动架构:
+//   local-echo 插件 (TCP :13333, DNS :53)
+//     ↑ direct outbound
+//   sing-box (本配置 — 12 协议 inbound)
+//     ↑ 各协议
+//   测试客户端 (zigbox/zigoutbounds ProtocolClient)
+//
+// 凭证（仅限本机开发测试，无生产价值）:
+//   SS2022 PSK:     cec3oZAgAaBi/F69ALSVgQ==
+//   Trojan 密码:     test-password
+//   Hysteria2 密码:  test-password / hysteria2-password
+//   VMess/VLESS UUID: 387b71a7-15ce-4ee0-a791-ab5a08aaa9dc
+//   TUIC 密码:       tuic-password
+//   Salamander:      salamander-password
+//
+// 端口分配:
+//   :2080  mixed       — SOCKS5 + HTTP 代理
+//   :2081  socks       — 纯 SOCKS5
+//   :2082  http        — 纯 HTTP
+//   :5354  direct(UDP) — DNS 转发 → 223.5.5.5:53
+//   :8388  shadowsocks — SS 2022 (2022-blake3-aes-128-gcm)
+//   :9443  trojan      — Trojan (TLS)
+//   :10443 hysteria2   — Hysteria2 (QUIC) 主端口
+//   :16800 vmess       — VMess (WebSocket)
+//   :16801 vless       — VLESS (TLS+XTLS)
+//   :16802 hysteria2   — Hysteria2 (QUIC) 副端口
+//   :16803 tuic        — TUIC v5 (QUIC)
+//   :16804 hysteria2   — Hysteria2 + Salamander 混淆
+
+{
+  "log": {
+    "level": "warn"
+  },
+
+  "experimental": {
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090",
+      "secret": ""
+    }
+  },
+
+  "inbounds": [
+    {
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "127.0.0.1",
+      "listen_port": 2080
+    },
+    {
+      "type": "socks",
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "listen_port": 2081
+    },
+    {
+      "type": "http",
+      "tag": "http-in",
+      "listen": "127.0.0.1",
+      "listen_port": 2082
+    },
+    {
+      "type": "direct",
+      "tag": "dns-in",
+      "listen": "127.0.0.1",
+      "listen_port": 5354,
+      "network": "udp",
+      "override_address": "223.5.5.5",
+      "override_port": 53
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "ss-in",
+      "listen": "127.0.0.1",
+      "listen_port": 8388,
+      "method": "2022-blake3-aes-128-gcm",
+      "password": "cec3oZAgAaBi/F69ALSVgQ=="
+    },
+    {
+      "type": "trojan",
+      "tag": "trojan-in",
+      "listen": "127.0.0.1",
+      "listen_port": 9443,
+      "users": [
+        {
+          "name": "test-user",
+          "password": "test-password"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "certs/localhost.crt",
+        "key_path": "certs/localhost.key"
+      }
+    },
+    {
+      "type": "hysteria2",
+      "tag": "hysteria2-in",
+      "listen": "127.0.0.1",
+      "listen_port": 10443,
+      "users": [
+        {
+          "name": "test-user",
+          "password": "test-password"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "certs/localhost.crt",
+        "key_path": "certs/localhost.key"
+      }
+    },
+    {
+      "type": "vmess",
+      "tag": "vmess-in",
+      "listen": "127.0.0.1",
+      "listen_port": 16800,
+      "users": [
+        {
+          "name": "test-user",
+          "uuid": "387b71a7-15ce-4ee0-a791-ab5a08aaa9dc",
+          "alterId": 0
+        }
+      ]
+    },
+    {
+      "type": "vless",
+      "tag": "vless-in",
+      "listen": "127.0.0.1",
+      "listen_port": 16801,
+      "users": [
+        {
+          "name": "test-user",
+          "uuid": "387b71a7-15ce-4ee0-a791-ab5a08aaa9dc",
+          "flow": ""
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "certs/localhost.crt",
+        "key_path": "certs/localhost.key"
+      }
+    },
+    {
+      "type": "hysteria2",
+      "tag": "hysteria2-alt-in",
+      "listen": "127.0.0.1",
+      "listen_port": 16802,
+      "users": [
+        {
+          "name": "test-user",
+          "password": "hysteria2-password"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "certs/localhost.crt",
+        "key_path": "certs/localhost.key"
+      }
+    },
+    {
+      "type": "tuic",
+      "tag": "tuic-in",
+      "listen": "127.0.0.1",
+      "listen_port": 16803,
+      "users": [
+        {
+          "name": "test-user",
+          "uuid": "387b71a7-15ce-4ee0-a791-ab5a08aaa9dc",
+          "password": "tuic-password"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "certs/localhost.crt",
+        "key_path": "certs/localhost.key"
+      }
+    },
+    {
+      "type": "hysteria2",
+      "tag": "hysteria2-salamander-in",
+      "listen": "127.0.0.1",
+      "listen_port": 16804,
+      "users": [
+        {
+          "name": "test-user",
+          "password": "hysteria2-password"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "certs/localhost.crt",
+        "key_path": "certs/localhost.key"
+      },
+      "obfs": {
+        "type": "salamander",
+        "password": "salamander-password"
+      }
+    }
+  ],
+
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct-out"
+    }
+  ]
+}

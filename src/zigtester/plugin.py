@@ -45,6 +45,7 @@ class PluginConfig:
     path: str = ""              # 插件目录绝对路径
     build: PluginBuild = field(default_factory=PluginBuild)
     lifecycle: PluginLifecycle | None = None
+    config: dict[str, Any] = field(default_factory=dict)  # 项目级覆盖配置
 
 
 # ── 解析 ────────────────────────────────────────────────────
@@ -181,13 +182,16 @@ def start_plugin(
     plugin: PluginConfig,
     work_dir: str,
 ) -> subprocess.Popen | None:
-    """启动插件进程（长期服务），等待 readiness probe。失败返回 None。"""
+    """启动插件进程（长期服务），等待 readiness probe。失败返回 None。
+
+    插件 config 字段中的键值会转为 PLUGIN_<KEY> 环境变量传入进程。
+    """
     if plugin.lifecycle is None or plugin.lifecycle.start.command is None:
         return None
 
     hook = plugin.lifecycle.start
     try:
-        proc = _start_plugin_process(hook, work_dir)
+        proc = _start_plugin_process(hook, work_dir, plugin.config)
 
         # 等待就绪
         ro = hook.ready_on
@@ -255,11 +259,18 @@ def stop_plugin(
 
 
 def _start_plugin_process(
-    hook: LifecycleHook, work_dir: str
+    hook: LifecycleHook, work_dir: str, plugin_config: dict[str, Any] | None = None
 ) -> subprocess.Popen:
-    """启动插件钩子命令（shell 模式）。"""
+    """启动插件钩子命令（shell 模式）。
+
+    插件配置通过 PLUGIN_<KEY> 环境变量注入进程。
+    """
     assert hook.command is not None
     merged_env = dict(os.environ)
+    if plugin_config:
+        for key, value in plugin_config.items():
+            env_key = f"PLUGIN_{key.upper()}"
+            merged_env[env_key] = str(value)
     return subprocess.Popen(
         hook.command,
         stdout=subprocess.PIPE,

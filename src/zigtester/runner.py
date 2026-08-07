@@ -485,12 +485,15 @@ def run_project(
             zt_root = _find_zigtester_root()
             if zt_root is not None:
                 available = discover_plugins(zt_root)
-                for name in cfg.plugins:
-                    if name not in available:
+                for plugin_ref in cfg.plugins:
+                    if plugin_ref.name not in available:
                         continue
-                    pcfg = parse_plugin_config(available[name])
+                    pcfg = parse_plugin_config(available[plugin_ref.name])
                     if pcfg is None:
                         continue
+                    # 合并项目级插件配置覆盖
+                    if plugin_ref.config:
+                        pcfg.config.update(plugin_ref.config)
                     build_plugin(pcfg)
                     proc = start_plugin(pcfg, pcfg.path)
                     if proc is not None:

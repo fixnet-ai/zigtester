@@ -11,6 +11,7 @@ authors = [
 dependencies = [
     "pyyaml>=6.0",
     "fastmcp>=2.0.0",
+    "requests>=2.28",
 ]
 # psutil 为可选依赖 — monitor.py 在无 psutil 时优雅降级
 [project.optional-dependencies]

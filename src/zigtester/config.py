@@ -109,13 +109,20 @@ class LevelConfig:
 
 
 @dataclass
+class PluginRef:
+    """插件引用 — 项目 zigtester.yaml 中声明的插件及覆盖配置。"""
+    name: str
+    config: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class ProjectConfig:
     """项目完整配置。"""
     project: str
     description: str = ""
     settings: ProjectSettings = field(default_factory=ProjectSettings)
     levels: dict[str, LevelConfig] = field(default_factory=dict)
-    plugins: list[str] = field(default_factory=list)
+    plugins: list[PluginRef] = field(default_factory=list)
 
 
 @dataclass
@@ -283,8 +290,17 @@ def parse_config(path: str) -> ProjectConfig:
         suites = [_parse_suite(s, settings) for s in suite_list]
         levels[level_name] = LevelConfig(suites=suites)
 
-    plugins_raw = raw.get("plugins", [])
-    plugins = [str(p) for p in plugins_raw] if plugins_raw else []
+    plugins: list[PluginRef] = []
+    for p in (raw.get("plugins") or []):
+        if isinstance(p, str):
+            plugins.append(PluginRef(name=p))
+        elif isinstance(p, dict):
+            plugins.append(PluginRef(
+                name=str(p["name"]),
+                config=dict(p.get("config", {})),
+            ))
+        else:
+            pass  # 忽略无效条目
 
     return ProjectConfig(
         project=project,

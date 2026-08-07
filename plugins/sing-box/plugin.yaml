@@ -1,0 +1,37 @@
+name: sing-box
+description: "sing-box 进程管理 + REST API 热重载 — 统一管理代理测试依赖"
+
+# 默认端口分配 — 项目可在 zigtester.yaml 中覆盖任意端口
+config:
+  api_listen: "127.0.0.1:9090"
+  echo_host: "127.0.0.1"
+  echo_port: 13333
+  # 协议 inbound 端口
+  mixed_port: 2080
+  socks_port: 2081
+  http_port: 2082
+  dns_direct_port: 5354
+  ss_port: 8388
+  trojan_port: 9443
+  hysteria2_port: 10443
+  vmess_port: 16800
+  vless_port: 16801
+  hysteria2_alt_port: 16802
+  tuic_port: 16803
+  hysteria2_salamander_port: 16804
+
+build:
+  command: "sing-box version"
+
+lifecycle:
+  start:
+    command: "python3 singbox_ctl.py serve --server-config configs/test_server.json"
+    timeout: 15
+    ready_on:
+      type: tcp
+      port: 9090
+      host: "127.0.0.1"
+  stop:
+    timeout: 10
+    kill:
+      - "sing-box"

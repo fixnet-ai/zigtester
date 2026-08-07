@@ -101,22 +101,39 @@
 - P6.3 ✅ 插件体系 (plugin.py)
 - P6.4 ✅ local-echo 插件迁移（Python asyncio）
 
-### Phase 7: sing-box 插件 🔄
-- **Status:** 设计完成，开始实现
+### Phase 7: sing-box 插件 — 统一配置完成 ✅
+- **Status:** 统一配置设计完成 + 验证通过
 - **Started:** 2026-08-07 11:30
-- **目标:** 统一管理 sing-box 进程生命周期 + REST API 热重载，消除 3 个独立 SingboxProcess 实现的重复代码
-- **设计决策:**
-  - 插件模式（同 local-echo），一次启动配置热切换
-  - `singbox_ctl.py` 封装 subprocess + REST API 客户端
-  - base.json 最小启动（仅 API，无协议端口），suite 通过 PUT /configs 推送完整配置
-  - 跨平台 UDP 检测（lsof / ss）
-  - 失败诊断：超时 drain stderr 最后 5 行
-- **待实现:**
-  - [ ] `plugins/sing-box/plugin.yaml`
-  - [ ] `plugins/sing-box/configs/base.json`
-  - [ ] `plugins/sing-box/singbox_ctl.py`
-  - [ ] `plugin.py` 支持插件 config 字段
-  - [ ] 项目接入验证
+- **Completed:** 2026-08-07 22:11
+- **目标:** 统一管理 sing-box 进程生命周期，一个配置文件满足所有测试需要
+- **完成项:**
+  - [x] 调研：6 项目 sing-box 使用分析（仅 zigoutbounds 实际使用，zigbox 不涉及）
+  - [x] TLS 证书迁移：`zigoutbounds → plugins/sing-box/certs/`（localhost.crt/key + test-localhost.crt/key）
+  - [x] `configs/test_server.json` — 统一配置文件（12 inbound + clash_api + direct outbound）
+  - [x] `configs/base.json` — 修正 `experimental.clash_api` 嵌套格式
+  - [x] `singbox_ctl.py` — serve 模式直接用 test_server.json 启动（移除无效的热重载）
+  - [x] `plugin.yaml` — 完整端口默认配置 + 简化启动命令
+  - [x] 验证：13 端口全部正常（TCP: 2080/2081/2082/8388/9443/16800/16801, UDP: 5354/8388/10443/16802/16803/16804）
+- **关键发现:**
+  - sing-box Clash API `PUT /configs` 只接受 Clash 格式配置，不支持原生格式热重载
+  - Hysteria2/TUIC 是 QUIC/UDP 协议，需用 `lsof -iUDP` 检测而非 TCP
+  - 原两套配置唯一冲突是 hysteria2 端口（10443 vs 16802），统一配置双端口共存解决
+- **统一配置端口分配:**
+  | 端口 | 协议 | 传输 | 来源 |
+  |------|------|------|------|
+  | 2080 | mixed | TCP | test + all_inbounds |
+  | 2081 | socks | TCP | all_inbounds |
+  | 2082 | http | TCP | all_inbounds |
+  | 5354 | direct (DNS) | UDP | test |
+  | 8388 | SS2022 | TCP+UDP | 所有测试 |
+  | 9443 | trojan | TCP | 所有测试 |
+  | 10443 | hysteria2 | UDP | test + benchmark |
+  | 16800 | vmess | TCP | all_inbounds |
+  | 16801 | vless | TCP | all_inbounds |
+  | 16802 | hysteria2 (alt) | UDP | all_inbounds |
+  | 16803 | tuic | UDP | all_inbounds |
+  | 16804 | hysteria2+salamander | UDP | experiment |
+- **待后续 (P7.4):** zigoutbounds 测试脚本迁移到 SingboxController
 
 ## Test Results
 

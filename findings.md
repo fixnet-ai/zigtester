@@ -211,10 +211,41 @@ zigoutbounds 有 **3 个独立的 SingboxProcess 实现**，大量重复代码�
 
 ### sing-box REST API 关键信息
 
-- 配置 `experimental.external_controller` 开启，默认 `127.0.0.1:9090`
+- 配置 `experimental.clash_api.external_controller` 开启（**嵌套格式**，非扁平 `experimental.external_controller`）
 - `PUT /configs` 热重载（需完整配置，不是 patch）
 - `GET /version` 健康检查
 - 认证：`Authorization: Bearer <secret>`（可选）
+
+### sing-box 统一配置实现发现（2026-08-07）
+
+#### Clash API 不支持原生格式热重载
+
+`PUT /configs` 返回 HTTP 200/204 但实际**只接受 Clash 格式配置**，sing-box 原生格式（如 `shadowsocks`、`hysteria2`、`tuic`）通过 API 推送后端口不会出现。这是 sing-box Clash API 的设计限制，非 bug。
+
+**结论**：热重载不可行。serve 模式直接用 `test_server.json` 完整配置启动，需要切换配置时直接重启进程。
+
+#### 统一配置端口表
+
+合并了原 `singbox_test.json`（6 inbound）和 `singbox_all_inbounds.json`（6 inbound）：
+- 共享端口：mixed(2080), ss(8388), trojan(9443), vmess(16800), vless(16801), tuic(16803) — 6 个
+- singbox_test.json 独有：hysteria2(10443), dns-direct(5354) — 2 个
+- singbox_all_inbounds.json 独有：socks(2081), http(2082), hysteria2-alt(16802) — 3 个
+- experiment-hysteria2 独有：hysteria2-salamander(16804) — 1 个
+- 合计 12 inbound，0 端口冲突
+
+#### Hysteria2/TUIC 使用 UDP
+
+Hysteria2 和 TUIC 基于 QUIC 协议，使用 UDP 传输。端口检测时必须用 `lsof -iUDP`（macOS）或 `ss -uln`（Linux），`lsof -iTCP` 查不到这些端口。
+
+#### TLS 证书迁移
+
+证书从 zigoutbounds 迁移到 `plugins/sing-box/certs/`，使 sing-box 插件完全自包含，不依赖其他项目的文件路径。这避免了跨项目的隐式依赖。
+
+#### 无关项目分析结果
+
+- **zigbox**：测试直接连 echo server，不经过 sing-box。只有 zigoutbounds 用 sing-box。
+- **zigtun**：无 sing-box 依赖。
+- **experiment-hysteria2**：手动测试脚本使用 sing-box，但无自动化测试。
 
 ## Visual/Browser Findings
 

@@ -10,7 +10,7 @@
 
 ## Current Phase
 
-Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅ | Phase 4 ✅ | Phase 5 ✅ | Phase 6 ✅ | Phase 7 🔄
+Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅ | Phase 4 ✅ | Phase 5 ✅ | Phase 6 ✅ | Phase 7 ✅
 
 ## Phases
 
@@ -111,39 +111,40 @@ Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅ | Phase 4 ✅ | Phase 5 ✅ | Phase 6 �
 
 - **Status:** complete ✅
 
-### Phase 7: sing-box 插件 — 统一进程管理 + REST API 热重载 🔄
-> **创建**: 2026-08-07
-> **背景**: zigoutbounds 有 3 个独立 SingboxProcess 实现，大量重复代码。sing-box 内建 Clash REST API 支持配置热重载（`PUT /configs`），可一次启动、配置随意切换。
+### Phase 7: sing-box 插件 — 统一配置 + 进程管理 ✅
+> **创建**: 2026-08-07 | **完成**: 2026-08-07 22:11
+> **背景**: zigoutbounds 有 3 个独立 SingboxProcess 实现，大量重复代码。sing-box 内建 Clash REST API 支持配置热重载，可一次启动、配置随意切换。
 > 详细调研见 `findings.md § sing-box 使用现状调研`。
+> 完整实施记录见 `progress.md § Phase 7`。
 
-#### P7.1: singbox_ctl.py 控制器
-- [ ] `SingboxController` 类 — 封装 subprocess 生命周期 + REST API 客户端
-  - `start(base_config)` — 启动 sing-box（最小 base config，仅 API 端口 9090）
-  - `stop(timeout)` — SIGTERM → wait → SIGKILL
-  - `is_running()` — 进程存活 + API 可访问
-  - `reload(config)` — PUT /configs 热切换配置，返回 HTTP 204
-  - `wait_ready(port, protocol, timeout)` — TCP/UDP 端口就绪检测
-  - `generate_ss_config(port, method, psk)` — 动态生成 SS2022 服务端配置
-  - `build_client_config(server_port, protocol, ...)` — 生成客户端配置
-- [ ] 跨平台 UDP 检测：macOS `lsof -iUDP`，Linux `ss -uln`
-- [ ] 失败诊断：超时后 drain stderr，输出最后 5 行
+#### P7.1: singbox_ctl.py 控制器 ✅
+- [x] `SingboxController` 类 — 封装 subprocess 生命周期 + REST API 客户端
+- [x] CLI `serve` 子命令 — 启动阻塞模式，直接用 test_server.json 启动
+- [x] 跨平台 UDP 检测：macOS `lsof -iUDP`，Linux `ss -uln`
+- [x] 失败诊断：超时后 drain stderr，输出最后 5 行
+- [x] 配置生成辅助方法：generate_ss_config / build_client_config / build_server_config
 
-#### P7.2: 插件文件
-- [ ] `plugins/sing-box/plugin.yaml` — 插件清单
-  - build: `sing-box version` 验证 PATH
-  - start: `python3 singbox_ctl.py serve --api-listen 127.0.0.1:9090`
-  - ready_on: tcp:9090
-  - stop: kill sing-box
-- [ ] `plugins/sing-box/configs/base.json` — 最小启动配置（log:warn + API + empty inbounds）
+#### P7.2: 统一配置设计 ✅
+- [x] 调研 6 项目 sing-box 使用（仅 zigoutbounds 实际使用，zigbox 不涉及）
+- [x] 合并 3 套配置为 `configs/test_server.json`（12 inbound + clash_api + direct outbound）
+- [x] 解决唯一端口冲突：hysteria2 10443 vs 16802（双端口共存）
+- [x] TLS 证书迁移：`zigoutbounds → plugins/sing-box/certs/`（插件自包含）
+- [x] `configs/base.json` 修正 `experimental.clash_api` 嵌套格式
+- [x] 验证：13 端口全部就绪（TCP: 2080/2081/2082/8388/9443/16800/16801, UDP: 5354/8388/10443/16802/16803/16804）
 
-#### P7.3: 项目配置支持
-- [ ] `plugin.py` — 支持插件接收 `config` 字段（端口映射等）
-- [ ] `zigtester.yaml` 语法：`plugins: [{name: sing-box, config: {ss_port: 8388, ...}}]`
-- [ ] 验证：`zigtester run zigoutbounds --level functional` 插件自动管理 sing-box
+#### P7.3: 项目配置支持 ✅
+- [x] `PluginRef` 数据模型（name + config dict），支持 `str` 和 `dict` 双格式
+- [x] `PLUGIN_<KEY>` 环境变量注入插件子进程
+- [x] runner.py 适配 PluginRef，合并默认配置和项目覆盖配置
+- [x] 校验：现有 `plugins: ["local-echo"]` 字符串格式向后兼容
 
-#### P7.4: zigoutbounds 接入（后续）
+#### 关键发现
+- **Clash API 限制**：`PUT /configs` 仅接受 Clash 格式，不支持原生格式热重载 → serve 直接启动完整配置
+- **Hysteria2/TUIC = UDP**：QUIC 协议端口需 `lsof -iUDP` 检测，非 TCP
+
+#### P7.5: zigoutbounds 测试脚本迁移（后续）
 - [ ] 更新 `zigoutbounds/zigtester.yaml` 引用 sing-box 插件
-- [ ] 测试脚本迁移到 `singbox_ctl`（渐进，不强制）
+- [ ] 测试脚本迁移到 `SingboxController`（渐进，不破坏现有测试）
 
 ## Key Questions
 
