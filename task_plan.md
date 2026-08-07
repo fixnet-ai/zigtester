@@ -10,7 +10,7 @@
 
 ## Current Phase
 
-Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅ | Phase 4 ✅ | Phase 5 ✅ | Phase 6 ✅
+Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅ | Phase 4 ✅ | Phase 5 ✅ | Phase 6 ✅ | Phase 7 🔄
 
 ## Phases
 
@@ -111,7 +111,44 @@ Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅ | Phase 4 ✅ | Phase 5 ✅ | Phase 6 �
 
 - **Status:** complete ✅
 
+### Phase 7: sing-box 插件 — 统一进程管理 + REST API 热重载 🔄
+> **创建**: 2026-08-07
+> **背景**: zigoutbounds 有 3 个独立 SingboxProcess 实现，大量重复代码。sing-box 内建 Clash REST API 支持配置热重载（`PUT /configs`），可一次启动、配置随意切换。
+> 详细调研见 `findings.md § sing-box 使用现状调研`。
+
+#### P7.1: singbox_ctl.py 控制器
+- [ ] `SingboxController` 类 — 封装 subprocess 生命周期 + REST API 客户端
+  - `start(base_config)` — 启动 sing-box（最小 base config，仅 API 端口 9090）
+  - `stop(timeout)` — SIGTERM → wait → SIGKILL
+  - `is_running()` — 进程存活 + API 可访问
+  - `reload(config)` — PUT /configs 热切换配置，返回 HTTP 204
+  - `wait_ready(port, protocol, timeout)` — TCP/UDP 端口就绪检测
+  - `generate_ss_config(port, method, psk)` — 动态生成 SS2022 服务端配置
+  - `build_client_config(server_port, protocol, ...)` — 生成客户端配置
+- [ ] 跨平台 UDP 检测：macOS `lsof -iUDP`，Linux `ss -uln`
+- [ ] 失败诊断：超时后 drain stderr，输出最后 5 行
+
+#### P7.2: 插件文件
+- [ ] `plugins/sing-box/plugin.yaml` — 插件清单
+  - build: `sing-box version` 验证 PATH
+  - start: `python3 singbox_ctl.py serve --api-listen 127.0.0.1:9090`
+  - ready_on: tcp:9090
+  - stop: kill sing-box
+- [ ] `plugins/sing-box/configs/base.json` — 最小启动配置（log:warn + API + empty inbounds）
+
+#### P7.3: 项目配置支持
+- [ ] `plugin.py` — 支持插件接收 `config` 字段（端口映射等）
+- [ ] `zigtester.yaml` 语法：`plugins: [{name: sing-box, config: {ss_port: 8388, ...}}]`
+- [ ] 验证：`zigtester run zigoutbounds --level functional` 插件自动管理 sing-box
+
+#### P7.4: zigoutbounds 接入（后续）
+- [ ] 更新 `zigoutbounds/zigtester.yaml` 引用 sing-box 插件
+- [ ] 测试脚本迁移到 `singbox_ctl`（渐进，不强制）
+
 ## Key Questions
+
+8. **新增**：插件 config 字段是静态声明还是支持 suite 级覆盖？（先做静态声明）
+9. **新增**：base.json 是否需要 `cache_file` 持久化？（先不加，避免状态污染）
 
 1. ~~zigoutbounds 的 `outbound-dev` skill 中 6 步流程和黄金法则是否需要单独保留为 skill？~~ → 已迁入 CLAUDE.md
 2. zigtun/zigproxy/zigdns 目前没有测试脚本，zigtester.yaml 是否只配 `zig build test` 即可？→ 当前已满足需求，未来有测试脚本再加

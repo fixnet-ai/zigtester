@@ -163,6 +163,59 @@ sock.bind(('127.0.0.1', 53))
 - `../zigbox/tests/SKILL.md` — 89K 权威测试文档（未改动）
 - create-tester skill — zigtester.yaml 交互式生成工具
 
+## sing-box 使用现状调研（2026-08-07）
+
+### 现有实现
+
+zigoutbounds 有 **3 个独立的 SingboxProcess 实现**，大量重复代码：
+
+| 文件 | 行号 | 特点 |
+|------|------|------|
+| `test_protocols.py` | 596-872 | 最完整：动态/共享双模式，UDP 检测，stderr dump |
+| `test_all_protocols.py` | 206-280 | 服务器 + 多客户端（每协议一个 SingboxProcess） |
+| `benchmark.py` | 265-471 | 三协议（SS2022/Trojan/Hy2），自签证书生成 |
+
+### 共同模式
+
+1. **启动**: 清理残留 → `sing-box run -c <tempfile>` → 轮询端口
+2. **配置**: 共享 JSON 文件（13 个）或代码 `json.dumps` 动态生成
+3. **就绪检测**: TCP `socket.create_connection`；UDP `lsof -iUDP`（macOS）/ `ss -uln`（Linux）
+4. **失败诊断**: 超时 drain stderr 最后 5 行
+5. **停止**: SIGTERM → wait 3-5s → SIGKILL → unlink 临时文件
+
+### 关键端口
+
+| 协议 | 端口 | 配置来源 |
+|------|------|---------|
+| mixed | 2080 | singbox_all_inbounds.json, singbox_test.json |
+| shadowsocks 2022 | 8388 | 动态生成 / singbox_test.json |
+| trojan | 9443 | singbox_test.json |
+| hysteria2 | 10443 | singbox_test.json / benchmark.py |
+| vmess | 16800 | singbox_all_inbounds.json |
+| vless | 16801 | singbox_all_inbounds.json |
+| hysteria2 (alt) | 16802 | singbox_all_inbounds.json |
+| tuic | 16803 | singbox_all_inbounds.json |
+
+### 遗留文件
+
+`notun_ss2022_test.json`、`tun_ss2022_udp_test.json`、`singbox_ss2022_udp_server.json` — 未被任何代码引用，仅用于手动 `sing-box run -c` 调试。
+
+### 设计决策
+
+| 决策 | 理由 |
+|------|------|
+| 用 REST API 热重载而非反复启停进程 | 一次启动，配置随意切换，消除端口冲突 |
+| 最小 base.json（仅 API + empty inbounds） | 不预设协议端口，由 suite 按需推送 |
+| 插件 config 字段声明默认端口 | 各项目定制独立端口，不硬编码 |
+| 先实现插件核心，后迁移测试脚本 | 渐进式，不破坏现有测试 |
+
+### sing-box REST API 关键信息
+
+- 配置 `experimental.external_controller` 开启，默认 `127.0.0.1:9090`
+- `PUT /configs` 热重载（需完整配置，不是 patch）
+- `GET /version` 健康检查
+- 认证：`Authorization: Bearer <secret>`（可选）
+
 ## Visual/Browser Findings
 
 -

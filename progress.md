@@ -101,6 +101,23 @@
 - P6.3 ✅ 插件体系 (plugin.py)
 - P6.4 ✅ local-echo 插件迁移（Python asyncio）
 
+### Phase 7: sing-box 插件 🔄
+- **Status:** 设计完成，开始实现
+- **Started:** 2026-08-07 11:30
+- **目标:** 统一管理 sing-box 进程生命周期 + REST API 热重载，消除 3 个独立 SingboxProcess 实现的重复代码
+- **设计决策:**
+  - 插件模式（同 local-echo），一次启动配置热切换
+  - `singbox_ctl.py` 封装 subprocess + REST API 客户端
+  - base.json 最小启动（仅 API，无协议端口），suite 通过 PUT /configs 推送完整配置
+  - 跨平台 UDP 检测（lsof / ss）
+  - 失败诊断：超时 drain stderr 最后 5 行
+- **待实现:**
+  - [ ] `plugins/sing-box/plugin.yaml`
+  - [ ] `plugins/sing-box/configs/base.json`
+  - [ ] `plugins/sing-box/singbox_ctl.py`
+  - [ ] `plugin.py` 支持插件 config 字段
+  - [ ] 项目接入验证
+
 ## Test Results
 
 | Test | Input | Expected | Actual | Status |
