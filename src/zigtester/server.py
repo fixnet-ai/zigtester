@@ -1,16 +1,25 @@
-"""MCP Server — FastMCP stdio transport。
+"""MCP Server — FastMCP HTTP transport。
 
 提供 5 个工具供 Claude Code 调用：
   zigtester_scan / zigtester_run / zigtester_list / zigtester_history / zigtester_init
 
 服务端解析原始测试输出，只向 Claude 返回结构化摘要，最大化节省 token。
+
+使用 HTTP transport（端口绑定天然互斥，解决 stdio 多实例问题）：
+  python -m zigtester.server                  # 默认 127.0.0.1:9020
+  ZIGTESTER_PORT=9021 python -m zigtester.server  # 自定义端口
 """
 
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
 from fastmcp import FastMCP
+
+_DEFAULT_HOST = "127.0.0.1"
+_DEFAULT_PORT = 9020
 
 mcp = FastMCP("zigtester")
 
@@ -260,9 +269,39 @@ def zigtester_init(dir: str, project: str) -> dict:
     }
 
 
+_PID_FILE = Path.home() / ".zigtester" / "server.pid"
+
+
+def _write_pid() -> int:
+    """写入 PID 文件（父目录自动创建）。返回当前 pid。"""
+    pid = os.getpid()
+    _PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _PID_FILE.write_text(str(pid))
+    return pid
+
+
+def _cleanup_pid() -> None:
+    """删除 PID 文件（仅当内容匹配当前 pid）。"""
+    try:
+        if _PID_FILE.exists() and _PID_FILE.read_text().strip() == str(os.getpid()):
+            _PID_FILE.unlink()
+    except OSError:
+        pass
+
+
 def main():
-    """MCP Server 入口 — stdio transport。"""
-    mcp.run()
+    """MCP Server 入口 — HTTP transport。"""
+    host = os.environ.get("ZIGTESTER_HOST", _DEFAULT_HOST)
+    port = int(os.environ.get("ZIGTESTER_PORT", str(_DEFAULT_PORT)))
+
+    pid = _write_pid()
+    print(f"[zigtester] MCP Server 启动: http://{host}:{port}  (PID {pid})", file=sys.stderr)
+
+    try:
+        mcp.run(transport="http", host=host, port=port)
+    finally:
+        _cleanup_pid()
+        print(f"[zigtester] MCP Server 已停止 (PID {pid})", file=sys.stderr)
 
 
 if __name__ == "__main__":
