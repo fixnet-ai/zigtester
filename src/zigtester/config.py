@@ -41,6 +41,25 @@ class ResourceLimits:
 
 
 @dataclass
+class ReadyOn:
+    """就绪检测探头 — setup 命令执行后等待服务就绪。"""
+    type: str = "tcp"            # tcp | process
+    port: int = 0
+    host: str = "127.0.0.1"
+    timeout: int = 30
+    interval: float = 0.5
+
+
+@dataclass
+class LifecycleHook:
+    """生命周期钩子 — setup 或 teardown 阶段执行的命令。"""
+    command: str | None = None   # 要执行的命令（None = 无命令，仅依赖 kill 清理）
+    timeout: int = 30             # 独立超时（秒），不计入 suite 的 test timeout
+    ready_on: ReadyOn | None = None   # setup 成功后等待就绪的探头
+    kill: list[str] | None = None     # teardown 时按进程名清理
+
+
+@dataclass
 class ResourceSnapshot:
     """资源采样快照 — monitor.py 产出。"""
     pid: int = 0
@@ -75,6 +94,8 @@ class SuiteConfig:
     metrics: list[MetricDef] = field(default_factory=list)
     thresholds: dict[str, Threshold] = field(default_factory=dict)
     resource_limits: ResourceLimits | None = None
+    setup: LifecycleHook | None = None
+    teardown: LifecycleHook | None = None
 
     @property
     def qualified_name(self) -> str:
@@ -94,6 +115,7 @@ class ProjectConfig:
     description: str = ""
     settings: ProjectSettings = field(default_factory=ProjectSettings)
     levels: dict[str, LevelConfig] = field(default_factory=dict)
+    plugins: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -109,6 +131,8 @@ class SuiteResult:
     metrics: dict[str, float] = field(default_factory=dict)
     resource_peak: ResourceSnapshot = field(default_factory=ResourceSnapshot)
     message: str = ""
+    setup_error: str = ""
+    teardown_error: str = ""
 
 
 @dataclass
@@ -160,6 +184,31 @@ def _parse_threshold(raw: dict) -> Threshold:
     )
 
 
+def _parse_ready_on(raw: dict | None) -> ReadyOn | None:
+    """解析就绪检测探头配置。"""
+    if raw is None:
+        return None
+    return ReadyOn(
+        type=str(raw.get("type", "tcp")),
+        port=int(raw.get("port", 0)),
+        host=str(raw.get("host", "127.0.0.1")),
+        timeout=int(raw.get("timeout", 30)),
+        interval=float(raw.get("interval", 0.5)),
+    )
+
+
+def _parse_lifecycle_hook(raw: dict | None) -> LifecycleHook | None:
+    """解析生命周期钩子配置。"""
+    if raw is None:
+        return None
+    return LifecycleHook(
+        command=raw.get("command"),
+        timeout=int(raw.get("timeout", 30)),
+        ready_on=_parse_ready_on(raw.get("ready_on")),
+        kill=raw.get("kill"),
+    )
+
+
 def _parse_resource_limits(raw: dict | None) -> ResourceLimits | None:
     if raw is None:
         return None
@@ -194,6 +243,8 @@ def _parse_suite(raw: dict, global_settings: ProjectSettings) -> SuiteConfig:
         metrics=metrics,
         thresholds=thresholds,
         resource_limits=_parse_resource_limits(raw.get("resource_limits")),
+        setup=_parse_lifecycle_hook(raw.get("setup")),
+        teardown=_parse_lifecycle_hook(raw.get("teardown")),
     )
 
 
@@ -232,11 +283,15 @@ def parse_config(path: str) -> ProjectConfig:
         suites = [_parse_suite(s, settings) for s in suite_list]
         levels[level_name] = LevelConfig(suites=suites)
 
+    plugins_raw = raw.get("plugins", [])
+    plugins = [str(p) for p in plugins_raw] if plugins_raw else []
+
     return ProjectConfig(
         project=project,
         description=description,
         settings=settings,
         levels=levels,
+        plugins=plugins,
     )
 
 
@@ -288,6 +343,24 @@ def validate_config(raw: dict) -> list[str]:
                             f"levels.{level_name}[{i}].parser 无效: {parser!r}，"
                             f"有效值: {', '.join(VALID_PARSERS)}"
                         )
+                    # 校验 setup/teardown
+                    for hook_key in ("setup", "teardown"):
+                        hook = suite.get(hook_key)
+                        if hook is not None:
+                            if not isinstance(hook, dict):
+                                errors.append(f"levels.{level_name}[{i}].{hook_key} 必须是 dict/object")
+                                continue
+                            ro = hook.get("ready_on")
+                            if ro is not None:
+                                if not isinstance(ro, dict):
+                                    errors.append(f"levels.{level_name}[{i}].{hook_key}.ready_on 必须是 dict/object")
+                                else:
+                                    rt = ro.get("type", "tcp")
+                                    if rt not in ("tcp", "process"):
+                                        errors.append(f"levels.{level_name}[{i}].{hook_key}.ready_on.type 无效: {rt!r}，有效值: tcp, process")
+                            kill = hook.get("kill")
+                            if kill is not None and not isinstance(kill, list):
+                                errors.append(f"levels.{level_name}[{i}].{hook_key}.kill 必须是数组")
 
     # settings (可选)
     if "settings" in raw:
@@ -336,6 +409,14 @@ levels:
   #     thresholds:
   #       throughput:
   #         min: 100
+  #     # setup:                   # 可选：测试前启动依赖服务
+  #     #   command: "zig-out/bin/mock-server"
+  #     #   timeout: 15
+  #     #   ready_on:
+  #     #     type: tcp
+  #     #     port: 9999
+  #     # teardown:                # 可选：测试后清理（失败/超时也会执行）
+  #     #   kill: ["mock-server"]
 
   # stress:
   #   - name: "concurrency-stress"

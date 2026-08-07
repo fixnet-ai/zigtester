@@ -15,6 +15,11 @@
       "type": "string",
       "description": "项目描述"
     },
+    "plugins": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "引用的 zigtester 插件名列表"
+    },
     "settings": {
       "type": "object",
       "description": "全局设置",
@@ -117,9 +122,32 @@
             "fd_count": {"type": "integer", "minimum": 0},
             "cpu_percent": {"type": "number", "minimum": 0}
           }
-        }
+        },
+        "setup": {"$ref": "#/$defs/lifecycle_hook"},
+        "teardown": {"$ref": "#/$defs/lifecycle_hook"}
       },
       "additionalProperties": false
+    },
+    "ready_on": {
+      "type": "object",
+      "description": "就绪检测探头",
+      "properties": {
+        "type": {"type": "string", "enum": ["tcp", "process"], "default": "tcp"},
+        "port": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "host": {"type": "string", "default": "127.0.0.1"},
+        "timeout": {"type": "integer", "minimum": 1, "default": 30},
+        "interval": {"type": "number", "minimum": 0.1, "default": 0.5}
+      }
+    },
+    "lifecycle_hook": {
+      "type": "object",
+      "description": "生命周期钩子",
+      "properties": {
+        "command": {"type": "string", "description": "要执行的命令"},
+        "timeout": {"type": "integer", "minimum": 1, "default": 30},
+        "ready_on": {"$ref": "#/$defs/ready_on"},
+        "kill": {"type": "array", "items": {"type": "string"}, "description": "进程名列表（teardown 时清理）"}
+      }
     },
     "metric_def": {
       "type": "object",

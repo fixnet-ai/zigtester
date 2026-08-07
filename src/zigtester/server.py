@@ -144,6 +144,11 @@ def zigtester_run(
         # 仅失败时包含 stderr 摘要（最多 500 字符）
         if s.status in ("FAIL", "ERROR") and s.stderr:
             entry["stderr_tail"] = s.stderr[-500:]
+        # 生命周期错误
+        if s.setup_error:
+            entry["setup_error"] = s.setup_error
+        if s.teardown_error:
+            entry["teardown_error"] = s.teardown_error
         # 资源信息（仅 performance/stress）
         if s.resource_peak.sample_count > 0:
             entry["resource"] = {

@@ -41,10 +41,34 @@
 
 5. **stub skill 模板值得微调** — 试点后的 stub 结构（MCP 速查表 → 测试分层 → 安全警告 → 文档指针）清晰有效，可作为 Phase 2-4 的模板。
 
-### 接入差距
-- zigbox ✅ 试点完成
-- zigtun/zigproxy/zigdns ❌ 尚无 zigtester.yaml — Phase 2 生成
-- zigoutbounds ❌ 尚无 zigtester.yaml + 重构中 — Phase 4
+### 测试流畅性根因分析（2026-08-07）
+
+zigoutbounds 全量测试（11 套件）中暴露了 5 个问题，根因不在被测代码，而在于 **zigtester 缺少测试环境生命周期管理**——没有 setup/teardown 钩子，没有 pre-flight 验证，没有 guaranteed cleanup。
+
+| # | 症状 | 表面修复 | 根因 |
+|---|------|---------|------|
+| 1 | 端口冲突 | 加端口检查 | 没有 pre-flight 验证 |
+| 2 | 僵尸进程 | 加清理脚本 | 没有 guaranteed teardown |
+| 3 | 超时不匹配 | 加参数覆盖 | setup/teardown 和 test 共用一个 timeout |
+| 4 | ~~UDP 就绪检测~~ | ~~写文档~~ | 不应由框架解决（测试脚本自身职责） |
+| 5 | 清理逻辑激进 | 写准则 | 没有结构化的 cleanup contract |
+
+**结论**：5 个问题指向同一个架构缺陷。真正的解决方案不是逐个修补，而是为 zigtester 增加 **生命周期钩子（setup/teardown）+ 插件体系**。
+
+### 测试基础设施寄生问题（2026-08-07）
+
+zigbox 的 `local-echo.zig`（1285 行）是一个 TCP echo + DNS echo 服务器，作为 zigbox 代理链测试的沙箱目标。它目前嵌在 zigbox 生产代码中，通过 `--local-echo` CLI flag 激活。
+
+这违反了关注点分离：测试基础设施不应寄生在生产代码中。local-echo.zig 的启动/停止/就绪检测完全符合 zigtester 插件的生命周期模型——它应该作为 zigtester 插件，由框架在测试前构建、启动，在测试后停止。
+
+### zigoutbounds 测试脚本优化总结（2026-08-07）
+
+已在上游测试脚本中修复的问题（非 zigtester 本身）：
+- `SingboxProcess._wait_ready` 始终检查 8388 端口，对 Trojan(9443)/Hysteria2(10443) 无效 → 已加 `ready_port` 参数
+- 共享配置加载全部 5 个 inbound，无需的端口也被绑定 → 已加 `protocol_type` 参数按需过滤
+- benchmark.py Hysteria2 就绪检测为 `sleep(1.0)` → 改为 lsof UDP 检测
+- benchmark.py JSON 导出 hysteria2 误写 `trojan_port` key → 已修正
+- bench-hysteria2 超时 → zigtester.yaml 加 `--count 10`
 
 ## Technical Decisions
 

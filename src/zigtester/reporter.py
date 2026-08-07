@@ -253,6 +253,12 @@ class Reporter:
                   f"fd: peak={rp.peak_fd_count} | "
                   f"cpu: peak={rp.peak_cpu_pct}%{_RESET}")
 
+        # 显示 setup/teardown 错误（始终显示，非 verbose 也展示关键信息）
+        if suite.setup_error:
+            print(f"      {_YELLOW}⚠ setup: {suite.setup_error}{_RESET}")
+        if suite.teardown_error:
+            print(f"      {_YELLOW}⚠ teardown: {suite.teardown_error}{_RESET}")
+
     # ── Markdown 格式 ──────────────────────────────────────
 
     def to_markdown(self, result: ProjectResult) -> str:
@@ -311,6 +317,29 @@ class Reporter:
 
     def to_json(self, result: ProjectResult) -> str:
         """导出 JSON 格式报告。"""
+        def _build_suite_dict(s: SuiteResult) -> dict:
+            d: dict = {
+                "name": s.suite_name,
+                "level": s.level,
+                "status": s.status,
+                "duration_ms": round(s.duration_ms, 1),
+                "exit_code": s.exit_code,
+                "message": s.message,
+                "metrics": s.metrics,
+                "resource": {
+                    "peak_memory_mb": s.resource_peak.peak_memory_mb,
+                    "avg_memory_mb": s.resource_peak.avg_memory_mb,
+                    "peak_fd": s.resource_peak.peak_fd_count,
+                    "peak_cpu_pct": s.resource_peak.peak_cpu_pct,
+                    "sample_count": s.resource_peak.sample_count,
+                },
+            }
+            if s.setup_error:
+                d["setup_error"] = s.setup_error
+            if s.teardown_error:
+                d["teardown_error"] = s.teardown_error
+            return d
+
         return json.dumps({
             "project": result.project,
             "path": result.path,
@@ -323,25 +352,7 @@ class Reporter:
                 "skipped": sum(1 for s in result.suites if s.status == "SKIP"),
                 "errors": sum(1 for s in result.suites if s.status == "ERROR"),
             },
-            "suites": [
-                {
-                    "name": s.suite_name,
-                    "level": s.level,
-                    "status": s.status,
-                    "duration_ms": round(s.duration_ms, 1),
-                    "exit_code": s.exit_code,
-                    "message": s.message,
-                    "metrics": s.metrics,
-                    "resource": {
-                        "peak_memory_mb": s.resource_peak.peak_memory_mb,
-                        "avg_memory_mb": s.resource_peak.avg_memory_mb,
-                        "peak_fd": s.resource_peak.peak_fd_count,
-                        "peak_cpu_pct": s.resource_peak.peak_cpu_pct,
-                        "sample_count": s.resource_peak.sample_count,
-                    },
-                }
-                for s in result.suites
-            ],
+            "suites": [_build_suite_dict(s) for s in result.suites],
         }, indent=2, ensure_ascii=False)
 
     def save_json(self, result: ProjectResult, path: str) -> None:
