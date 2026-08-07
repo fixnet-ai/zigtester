@@ -10,7 +10,7 @@
 
 ## Current Phase
 
-Phase 1 ✅ 完成，Phase 2 待启动
+Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅ | Phase 4 ⏸️ | Phase 5 ⏸️
 
 ## Phases
 
@@ -27,18 +27,18 @@ Phase 1 ✅ 完成，Phase 2 待启动
 - **Status:** complete
 
 ### Phase 2: zigtester.yaml 全覆盖（先决条件）
-- [ ] 为 zigtun 生成 `zigtester.yaml`（用 create-tester skill + 手动微调）
-- [ ] 为 zigproxy 生成 `zigtester.yaml`
-- [ ] 为 zigdns 生成 `zigtester.yaml`
-- [ ] 验证：`zigtester scan` 可发现 zigfoundation/zigbox/zigtun/zigproxy/zigdns
-- **Status:** pending
+- [x] 为 zigtun 生成 `zigtester.yaml`（用 create-tester skill + 手动微调）
+- [x] 为 zigproxy 生成 `zigtester.yaml`
+- [x] 为 zigdns 生成 `zigtester.yaml`
+- [x] 验证：`zigtester scan` 可发现 zigfoundation/zigbox/zigtun/zigproxy/zigdns
+- **Status:** complete
 
 ### Phase 3: 简单项目接入
-- [ ] zigfoundation CLAUDE.md 添加 `## 测试` 节 → 指向 zigtester MCP
-- [ ] zigtun CLAUDE.md 添加 `## 测试` 节
-- [ ] zigproxy CLAUDE.md 添加 `## 测试` 节
-- [ ] zigdns CLAUDE.md 添加 `## 测试` 节
-- **Status:** pending
+- [x] zigfoundation CLAUDE.md 添加 `## 测试` 节 → 指向 zigtester MCP
+- [x] zigtun CLAUDE.md 添加 `## 测试` 节
+- [x] zigproxy CLAUDE.md 添加 `## 测试` 节
+- [x] zigdns CLAUDE.md 添加 `## 测试` 节
+- **Status:** complete
 
 ### Phase 4: zigoutbounds skill 替换（等重构完成后）
 - [ ] 等待 zigoutbounds 重构稳定

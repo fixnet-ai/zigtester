@@ -25,10 +25,19 @@
   - `src/zigtester/__main__.py`（新建）
 
 ### Phase 2: zigtester.yaml 全覆盖
-- **Status:** pending
+- **Status:** complete ✅
+- **zigdns ✅** — 2026-08-07 09:09 | unit 层级，1/1 passed (2.8s)
+- **zigtun ✅** — 2026-08-07 09:12 | unit 层级，1/1 passed (3.1s)
+- **zigproxy ✅** — 2026-08-07 09:12 | unit 层级，1/1 passed (5.5s)
+- 验证：`zigtester scan` 发现全部 5 个项目 ✅
+- 验证：`zigtester run --all --level unit --parallel` 全部通过 ✅ (5/5, ~5.5s 并行)
 
 ### Phase 3: 简单项目接入
-- **Status:** pending
+- **Status:** complete ✅
+- **zigfoundation ✅** — CLAUDE.md 添加 `## 测试` 节
+- **zigdns ✅** — CLAUDE.md 添加 `## 测试` 节
+- **zigtun ✅** — CLAUDE.md 添加 `## 测试` 节
+- **zigproxy ✅** — CLAUDE.md 添加 `## 测试` 节
 
 ### Phase 4: zigoutbounds skill 替换（等重构完成后）
 - **Status:** pending
@@ -56,8 +65,8 @@
 
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 1 + 并行实现完成，Phase 2 待启动 |
-| Where am I going? | Phase 2→5：yaml 全覆盖 → 简单项目接入 → zigoutbounds → 验证 |
+| Where am I? | Phase 1-3 全部完成，Phase 4 暂缓，Phase 5 待启动 |
+| Where am I going? | 等 zigoutbounds 重构完成后启动 Phase 4→5 |
 | What's the goal? | 用 zigtester MCP 替换兄弟项目测试 skill，token -69% |
-| What have I learned? | zigbox 试点 -83%；并行实现简单正确；zig_test 解析器需适配 Zig 0.16 |
-| What have I done? | zigbox 试点 + 打包修复 + run_workspace 并行实现 + 端到端验证 |
+| What have I learned? | zigbox 试点 -83%；5 项目全接入仅需 unit 层级；并行 5.5s 完成全部 |
+| What have I done? | Phase 1-3：zigbox 试点 + 5 项目 zigtester.yaml + 4 项目 CLAUDE.md 测试节 |
