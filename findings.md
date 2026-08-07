@@ -61,6 +61,36 @@ zigbox 的 `local-echo.zig`（1285 行）是一个 TCP echo + DNS echo 服务器
 
 这违反了关注点分离：测试基础设施不应寄生在生产代码中。local-echo.zig 的启动/停止/就绪检测完全符合 zigtester 插件的生命周期模型——它应该作为 zigtester 插件，由框架在测试前构建、启动，在测试后停止。
 
+**解决方案**：用 Python asyncio 重写为 `zigtester/plugins/local-echo/echo_server.py`（~450行），功能完整，零外部依赖。
+
+**关键设计决策**：
+- **Python 而非 Zig**：用户决策。跨平台更简单（无需编译），asyncio 高性能对性能测试结果影响最小
+- **DNS 端口 53 + SO_REUSEADDR**：绑定 `127.0.0.1:53` 而非 `0.0.0.0`，用 `SO_REUSEADDR` 与 macOS mDNSResponder（`*:53`）共存。sudo 必需
+- **非 root 自适应**：`ensure_echo_server()` 检测 euid，非 root 自动传 `--no-dns`（NOTUN 测试不需要 DNS）
+- **Python 3.14 asyncio 兼容**：`asyncio.start_server` 强制 Stream API → 用 `loop.create_server()` for Protocol API；双栈需分别绑定 `0.0.0.0` 和 `::`
+
+**变更规模**：
+| 仓库 | 新增 | 删除 | 净变化 |
+|------|------|------|--------|
+| zigbox | 96 行 | 1,483 行 | -1,387 行 (-93%) |
+| zigtester | 1,456 行 | 107 行 | +1,349 行 |
+
+**DNS 端口演变**：
+1. 初始：15353（避免 mDNSResponder 冲突）→ 用户指出应直接用 53
+2. 最终：53 + SO_REUSEADDR + 绑定 127.0.0.1（标准端口，无冲突）
+
+### macOS DNS 端口绑定发现（2026-08-07）
+
+macOS mDNSResponder 绑定 `*:53`（UDP + TCP，IPv4/IPv6）。即使 `sudo`，直接 `bind('127.0.0.1', 53)` 也会报 `EADDRINUSE`。
+
+**解决方案**：`SO_REUSEADDR` socket 选项。设置后即使 `*:53` 已被占用，仍可成功绑定 `127.0.0.1:53`。
+
+```python
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind(('127.0.0.1', 53))
+```
+
 ### zigoutbounds 测试脚本优化总结（2026-08-07）
 
 已在上游测试脚本中修复的问题（非 zigtester 本身）：

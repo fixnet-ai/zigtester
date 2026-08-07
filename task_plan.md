@@ -91,7 +91,8 @@ Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅ | Phase 4 ✅ | Phase 5 ✅ | Phase 6 �
   - TCP 协议自动检测（SOCKS5/HTTP CONNECT/HTTP）
   - UDP DNS 代理（FakeIP 198.18.x.x + 上游转发）
   - 双栈 IPv4/IPv6 监听
-  - DNS 默认端口 15353（避免 macOS mDNSResponder 冲突）
+  - DNS 端口 53（SO_REUSEADDR 绑定 127.0.0.1，与 mDNSResponder *:53 共存，需 sudo）
+  - 非 root 自动跳过 DNS（--no-dns），仅 TCP echo；root 启用完整 TCP+DNS
 - [x] 清理 zigbox 生产代码：
   - `src/main.zig` — 删除 `--local-echo` CLI flag 和帮助文本
   - `src/engine.zig` — 删除 local-echo 初始化/启动/停止/deinit（~160 行）
