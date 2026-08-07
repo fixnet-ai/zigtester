@@ -1,10 +1,12 @@
 # zigtester
 
-fixnet 生态自动测试框架 — 元框架，包装各项目现有测试工具，提供统一配置、执行、报告和历史追踪。
+fixnet 生态自动测试框架。**元框架**——包装各项目现有测试工具，不替换它们。
+
+统一配置发现、子进程执行、输出解析、三路报告、历史追踪，通过 CLI（人类/CI）和 MCP Server（Claude Code）双层入口提供服务。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-## 项目依赖关系
+## 定位
 
 ```
 fixnet/
@@ -15,31 +17,32 @@ fixnet/
   zigdns/         ← DNS 组件库
   zigoutbounds/   ← 重量出站协议
   zigbox/         ← 编排层 + 轻量出站
-  zigtester/      ← 自动测试框架 (本项目) — 包装以上所有项目的测试
+  zigtester/      ← 自动测试框架 (本项目)
 ```
 
-详细架构与开发规范见 [CLAUDE.md](./CLAUDE.md)，完整设计见 [DESIGN.md](./DESIGN.md)。
+已接入 6 个项目，覆盖 unit / functional / performance / stress 四层测试。
 
 ## 安装
 
 ```bash
-pip install -e .            # 开发模式
-pip install -e ".[monitor]" # 含资源监控（psutil）
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .                     # 核心
+pip install -e ".[monitor]"          # + 资源监控（psutil）
 ```
 
 依赖：Python 3.10+、PyYAML、FastMCP。
 
 ## 快速开始
 
-### 1. 生成配置模板
+### 1. 生成配置
 
 ```bash
-zigtester init --dir /path/to/your/project --project myproject
+zigtester init --dir /path/to/project --project myproject
 ```
 
-这会生成一个 `zigtester.yaml`，编辑它声明你的测试层级和套件。
+编辑生成的 `zigtester.yaml`，声明测试套件。
 
-### 2. 发现项目
+### 2. 扫描项目
 
 ```bash
 zigtester scan --dir ~/works/2025/fixnet
@@ -48,21 +51,17 @@ zigtester scan --dir ~/works/2025/fixnet
 ### 3. 运行测试
 
 ```bash
-# 运行所有层级
-zigtester run myproject
-
-# 仅单元测试
-zigtester run myproject --level unit
-
-# 跨所有已发现项目
-zigtester run --all --level unit
-
-# JSON 输出（CI 友好）
-zigtester run myproject --report-format json --json-output /tmp/report.json
-
-# Markdown 报表
+zigtester run myproject                          # 所有层级
+zigtester run myproject --level unit             # 仅单元测试
+zigtester run myproject --level functional --suite e2e-ss2022  # 指定套件 + 自动依赖
+zigtester run --all --level unit                 # 全部已发现项目
+zigtester run --all --level unit --parallel       # 多项目并行
+zigtester run myproject --report-format json --json-output report.json
 zigtester run myproject --report-format markdown
+zigtester run myproject --fail-fast --verbose
 ```
+
+`--suite` 指定套件时，自动解析 `depends_on` 传递依赖并按拓扑序执行。
 
 ### 4. 查看历史
 
@@ -70,47 +69,16 @@ zigtester run myproject --report-format markdown
 zigtester history myproject all-tests
 ```
 
-## 架构
-
-```
-zigtester/
-├── pyproject.toml              # Python 包 + CLI/MCP 入口点
-├── schemas/
-│   └── zigtester.schema.json   # 配置 JSON Schema
-└── src/
-    ├── cli.py                  # CLI 入口 (scan/list/run/history/init)
-    ├── server.py               # MCP Server（FastMCP，5 个工具）
-    ├── config.py               # 数据模型 + YAML 解析 + 校验 + 模板生成
-    ├── scanner.py              # 项目发现（递归扫描 zigtester.yaml）
-    ├── runner.py               # 执行引擎（子进程 + 超时 + 依赖排序）
-    ├── reporter.py             # 三路输出（终端 ANSI / Markdown / JSON）
-    ├── metrics.py              # 性能指标提取（5 种内置解析器 + 阈值 + 分位数）
-    ├── monitor.py              # 资源监控（psutil 后台线程采样）
-    ├── history.py              # 历史存储 + 回归检测（移动平均对比）
-    └── plugin.py               # 插件管理（发现/构建/启停测试依赖插件）
-plugins/
-    ├── local-echo/             # TCP echo + UDP DNS 代理（替代 zigbox --local-echo）
-    │   ├── plugin.yaml
-    │   └── echo_server.py
-    └── sing-box/               # sing-box 统一进程管理 + 10 协议 inbound 双栈配置
-        ├── plugin.yaml
-        ├── singbox_ctl.py
-        ├── configs/
-        │   ├── test_server.json
-        │   └── base.json
-        └── certs/               # TLS 自签名证书
-```
-
 ## 测试分层
 
-```
-Layer 0: unit         — 单元测试（zig build test，纯代码，无网络依赖）
-Layer 1: functional   — 功能测试（协议验证、集成测试）
-Layer 2: performance  — 性能测试（吞吐/延迟/传输速率 + 阈值检查）
-Layer 3: stress       — 压力测试（高并发 + 资源上限监控）
-```
+| 层级 | 用途 | 示例 |
+|------|------|------|
+| `unit` | 单元测试，纯代码，无网络依赖 | `zig build test` |
+| `functional` | 功能测试，协议验证，集成测试 | `python3 tests/test_protocols.py` |
+| `performance` | 性能测试，吞吐/延迟 + 阈值检查 | `python3 tests/test_bench.py` |
+| `stress` | 压力测试，高并发 + 资源上限监控 | `python3 tests/stress.py -c 100` |
 
-## 配置文件格式
+## 配置文件
 
 ```yaml
 project: myproject
@@ -118,62 +86,134 @@ description: "项目描述"
 
 settings:
   work_dir: "."
-  build_command: "zig build"
+  build_command: "zig build"       # 可选：测试前自动构建
   timeout_default: 120
+  env:                             # 可选：全局环境变量
+    ZIG_EXE: zig
 
-plugins:
-  - local-echo                # 声明测试依赖插件（zigtester 自动管理生命周期）
+plugins:                           # 可选：测试依赖插件
+  - local-echo                     # 字符串格式，使用插件默认配置
+  - name: sing-box                 # 字典格式，覆盖插件默认值
+    config:
+      ss_port: 18388
 
 levels:
   unit:
     - name: "all-tests"
       command: "zig build test"
       parser: zig_test
-      timeout: 120
+      timeout: 180
+
   functional:
     - name: "smoke-test"
       command: "python3 tests/test_smoke.py"
+      timeout: 60
+
+    - name: "e2e-test"
+      command: "python3 tests/test_e2e.py"
+      timeout: 120
+      sudo: true                   # 需要 root 权限
+      depends_on:                  # 依赖链：先跑 smoke-test
+        - "functional.smoke-test"
+
   performance:
     - name: "bench"
       command: "python3 tests/test_bench.py -c 10 -n 100"
+      parser: bench
+      timeout: 120
       metrics:
         - name: throughput
           pattern: "吞吐: ([0-9.]+) req/s"
       thresholds:
         throughput:
-          min: 100
+          min: 100                 # 低于 100 → FAIL
 ```
 
-完整规范见 `schemas/zigtester.schema.json`。已接入项目的示例配置：
+### 内置输出解析器
 
-- `../zigfoundation/zigtester.yaml` — 单层级（unit）
-- `../zigbox/zigtester.yaml` — 三层级（unit + functional + performance）+ `plugins: [local-echo]`
-- `../zigoutbounds/zigtester.yaml` — 四层级 + `plugins: [local-echo, sing-box]`
+| 解析器 | 适用场景 | 行为 |
+|--------|---------|------|
+| `zig_test` | `zig build test` | 解析 `X/Y passed; Z skipped` |
+| `line_count` | 任意命令（默认） | exit 0 → PASS，输出行数作为指标 |
+| `test_protocols` | zigbox test_protocols.py | 解析 `总计 X \| 通过 Y \| 失败 Z` |
+| `bench` | 性能压测 | 吞吐/延迟分位/传输速率 |
+| `custom` | 用户自定义 | 用 `metrics.pattern` 正则捕获 |
+
+### suite 依赖
+
+`depends_on` 使用 `level.name` 格式声明前序套件。zigtester 自动拓扑排序，检测循环依赖。`--suite` 过滤时递归包含所有传递依赖。
+
+## 插件体系
+
+测试依赖（echo server、sing-box 等）通过 `plugin.yaml` 声明生命周期，zigtester 自动发现、构建、启动、就绪检测、停止。项目在 `zigtester.yaml` 中声明即可接入。
+
+### 加载链
+
+```
+plugin.yaml config:    →  插件默认配置（端口、地址等）
+zigtester.yaml config: →  项目级覆盖（合并到默认值之上）
+PLUGIN_<KEY> env vars: →  注入插件进程
+```
+
+### 已内置插件
+
+| 插件 | 用途 | 默认端口 |
+|------|------|---------|
+| `local-echo` | TCP echo + DNS echo | 13333 |
+| `sing-box` | 全协议代理服务器（10 协议 inbound） | 9090 (API) + 各协议端口 |
+
+### 自定义插件
+
+```yaml
+# plugins/my-plugin/plugin.yaml
+name: my-plugin
+description: "描述"
+config:
+  port: 9000
+build:
+  command: "zig build"
+  work_dir: "."
+lifecycle:
+  start:
+    command: "python3 server.py --port ${PLUGIN_PORT}"
+    timeout: 10
+    ready_on:
+      type: tcp
+      port: 9000
+  stop:
+    timeout: 5
+    kill: ["my-plugin"]
+```
 
 ## MCP 优先架构
 
-### 为什么 MCP
+zigtester MCP Server 在服务端解析原始测试输出，只向 Claude 返回结构化摘要——token 节省可达 10-50x。
 
-zigtester 是 MCP 的理想场景 — 大量原始测试输出在服务端解析为结构化摘要，只将关键结果传给 Claude，token 节省可达 10-50x。
+### MCP 工具
 
-| MCP 工具 | 用途 |
-|----------|------|
-| `zigtester_scan` | 发现所有包含 `zigtester.yaml` 的项目 |
-| `zigtester_list` | 列出项目的测试套件 |
-| `zigtester_run` | 执行测试，返回结构化摘要 |
-| `zigtester_history` | 查看性能历史 + 回归检测 |
-| `zigtester_init` | 生成初始配置模板 |
+| 工具 | 参数 | 用途 |
+|------|------|------|
+| `zigtester_scan` | `dir?` | 发现所有含 `zigtester.yaml` 的项目 |
+| `zigtester_list` | `project` | 列出项目的测试套件 |
+| `zigtester_run` | `project`, `level?`, `suite?` | 执行测试，返回结构化摘要 |
+| `zigtester_history` | `project`, `suite`, `limit?` | 性能历史 + 回归检测 |
+| `zigtester_init` | `dir`, `project` | 生成初始配置模板 |
 
-### 配置 MCP Server
+### 部署
 
-zigtester MCP Server 使用 HTTP transport（端口绑定天然互斥，杜绝 stdio 多实例问题）：
+MCP Server 使用 HTTP transport。端口绑定天然互斥，从物理上杜绝 stdio 模式的多实例僵尸进程问题。
 
 ```bash
-# 1. 启动 HTTP Server（常驻后台）
-ZIGTESTER_ROOT=/path/to/workspace python -m zigtester.server &
-# → http://127.0.0.1:9020/mcp  (PID 文件 ~/.zigtester/server.pid)
+# 启动（常驻后台）
+ZIGTESTER_ROOT=~/works/2025/fixnet python -m zigtester.server &
 
-# 2. Claude Code MCP 配置（~/.claude.json 的 mcpServers 段）
+# → 监听 http://127.0.0.1:9020/mcp
+# → PID 文件：~/.zigtester/server.pid
+```
+
+Claude Code 配置（`~/.claude.json` 的 `mcpServers` 段）：
+
+```json
 {
   "zigtester": {
     "type": "http",
@@ -182,59 +222,54 @@ ZIGTESTER_ROOT=/path/to/workspace python -m zigtester.server &
 }
 ```
 
-配置后 Claude Code 可直接调用上述工具。MCP Server 在服务端解析原始测试输出，只返回结构化摘要，大幅节省 token。
+### 典型工作流
 
-### 日常使用
-
-在 Claude Code 中直接用自然语言，MCP 自动执行。以 zigoutbounds 开发为例：
-
-| 场景 | 说什么 |
-|------|--------|
-| 改代码前验证基线 | "跑 xxx 的单元测试" |
-| 改代码后快速反馈 | "跑 xxx 的单元测试" |
-| 怀疑性能退化 | "看 xxx 的 bench 有没有变慢" |
-| 改了基础库（zigfoundation） | "跑全部项目的单元测试" |
-| 不知道有什么测试 | "xxx 有哪些测试" |
-
-**不需要记命令，不需要开终端，不需要切目录。**
-
-典型工作流：
+在 Claude Code 中直接用自然语言，MCP 自动执行：
 
 ```
-# 开发前看有什么测试
 "zigoutbounds 有哪些测试"
-→ 列出 11 套件：unit×1 + functional×7 + performance×3
+→ unit×1 + functional×8 + performance×3
 
-# 改代码后验证
 "跑 zigoutbounds 的单元测试"
-→ 1/1 passed，0.2s（自动记录历史）
+→ 1/1 passed，0.2s
 
-# 怀疑改坏了
-"跑 zigoutbounds 的 functional"
-→ crypto-only 全过，E2E 由 zigtester sing-box 插件自动管理（插件未安装时明确提示）
+"跑 zigoutbounds 的 functional 层的 e2e-ss2022"
+→ 自动包含依赖 crypto-ss2022，2/2 passed
 
-# 改了基础库，全部验证
 "跑全部项目的单元测试"
 → 6 项目并行 ~6s，全部通过
 
-# 检查是否变慢
 "看 zigoutbounds bench-ss2022 有没有变慢"
-→ 当前 520 req/s vs 历史 535 req/s，-2.8%（无回归）
+→ 当前 2168 req/s vs 历史 2140 req/s，+1.3%（无回归）
 ```
 
-### CLI 辅助
+## 目录结构
 
-MCP Server 供 Claude Code 调用，CLI 供人类终端和 CI/CD 使用，两者共享同一套核心模块：
-
-```bash
-# 终端彩色输出（人类阅读）
-zigtester run zigbox --level unit
-
-# Markdown 表格（Agent 解析）
-zigtester run zigbox --report-format markdown
-
-# JSON 导出（CI 对接）
-zigtester run zigbox --report-format json --json-output report.json
+```
+zigtester/
+├── pyproject.toml
+├── schemas/
+│   └── zigtester.schema.json
+├── src/zigtester/
+│   ├── cli.py                  # CLI 入口
+│   ├── server.py               # MCP Server（HTTP transport）
+│   ├── config.py               # 数据模型 + YAML 解析 + 校验
+│   ├── scanner.py              # 项目发现
+│   ├── runner.py               # 执行引擎（子进程 + 超时 + 依赖排序 + suite 过滤）
+│   ├── reporter.py             # 三路输出（终端 ANSI / Markdown / JSON）
+│   ├── metrics.py              # 指标提取 + 阈值检查
+│   ├── monitor.py              # 资源监控（psutil）
+│   ├── history.py              # 历史存储 + 回归检测
+│   └── plugin.py               # 插件管理
+├── plugins/
+│   ├── local-echo/             # TCP echo server
+│   │   ├── plugin.yaml
+│   │   └── echo_server.py
+│   └── sing-box/               # sing-box 进程管理
+│       ├── plugin.yaml
+│       ├── singbox_ctl.py
+│       └── configs/
+└── DESIGN.md                   # 完整设计文档
 ```
 
 ## 许可
