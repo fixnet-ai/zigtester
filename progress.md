@@ -2,6 +2,38 @@
 
 ## Session: 2026-08-07
 
+### Task 1: 生命周期管理审计与清理 ✅
+- **Status:** complete
+- **Started:** 2026-08-07 22:00
+- **Completed:** 2026-08-07 23:00
+- Actions taken:
+  - zigbox/tests/test_bench.py — 删除死代码 `_kill_on_port()`（从未调用，避免未来误杀插件进程）
+  - zigoutbounds/tests/tools/scaffold_protocol.py — 更新代码生成模板，生成的命令模板现在包含插件检测
+  - zigoutbounds/experiment-hysteria2/test/e2e_salamander.sh — 添加 `PLUGIN_SINGBOX_RUNNING` 检测，插件运行时跳过 sing-box 启动和端口清理
+  - experiment-hysteria2/test/e2e/run_e2e_test.py — 添加 `is_plugin_singbox_running()`，插件运行时复用统一配置端口
+- Verification: 插件 sing-box 运行时，所有脚本不再冲突或杀死插件进程
+
+### Task 2: TUN 测试迁移到 zigtun ✅
+- **Status:** complete
+- **Started:** 2026-08-07 23:00
+- **Completed:** 2026-08-07 23:45
+- zigtun 侧:
+  - `src/test_main.zig` — 新建 TUN 功能测试 CLI 二进制（3 测试：create/routes/packet-io）
+  - `build.zig` — 添加 `test-cli` 构建步骤
+  - `configs/test_tun.json` — 测试 TUN 配置
+  - `tests/test_tun.py` — Python 编排器
+  - `zigtester.yaml` — 新增 functional 层级（tun-create/tun-routes/tun-packet-io，均需 sudo）
+  - `CLAUDE.md` — 添加功能测试章节
+- zigbox 侧:
+  - `zigtester.yaml` — 移除 tun-transparent-proxy 套件
+  - `tests/test_all.py` — 简化为 NOTUN-only（移除 --tun/--notun、STAT_FILE、HEALTH_THRESHOLDS、check_health）
+  - `tests/test_tun.py` — 标记为手动调试用途
+  - `tests/SKILL.md` — 测试归属边界表新增 zigtun 行
+  - `tests/DEV.md` — 更新 TUN 引用
+  - `CLAUDE.md` — 更新测试分层描述
+- Verification:
+  - `zig build test-cli` 通过（zigtun 侧，需修复 Zig 0.16.0 API 变更：argsAlloc→Init.Minimal、Ip4Address struct、createTunPlatform pub、catch 返回类型匹配）
+
 ### 评估与会话初始化（已完成）
 - **Status:** complete
 

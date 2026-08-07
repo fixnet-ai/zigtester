@@ -86,7 +86,19 @@ zigtester/
     ├── reporter.py             # 三路输出（终端 ANSI / Markdown / JSON）
     ├── metrics.py              # 性能指标提取（5 种内置解析器 + 阈值 + 分位数）
     ├── monitor.py              # 资源监控（psutil 后台线程采样）
-    └── history.py              # 历史存储 + 回归检测（移动平均对比）
+    ├── history.py              # 历史存储 + 回归检测（移动平均对比）
+    └── plugin.py               # 插件管理（发现/构建/启停测试依赖插件）
+plugins/
+    ├── local-echo/             # TCP echo + UDP DNS 代理（替代 zigbox --local-echo）
+    │   ├── plugin.yaml
+    │   └── echo_server.py
+    └── sing-box/               # sing-box 统一进程管理 + 10 协议 inbound 双栈配置
+        ├── plugin.yaml
+        ├── singbox_ctl.py
+        ├── configs/
+        │   ├── test_server.json
+        │   └── base.json
+        └── certs/               # TLS 自签名证书
 ```
 
 ## 测试分层
@@ -108,6 +120,9 @@ settings:
   work_dir: "."
   build_command: "zig build"
   timeout_default: 120
+
+plugins:
+  - local-echo                # 声明测试依赖插件（zigtester 自动管理生命周期）
 
 levels:
   unit:
@@ -132,7 +147,8 @@ levels:
 完整规范见 `schemas/zigtester.schema.json`。已接入项目的示例配置：
 
 - `../zigfoundation/zigtester.yaml` — 单层级（unit）
-- `../zigbox/zigtester.yaml` — 三层级（unit + functional + performance）
+- `../zigbox/zigtester.yaml` — 三层级（unit + functional + performance）+ `plugins: [local-echo]`
+- `../zigoutbounds/zigtester.yaml` — 四层级 + `plugins: [local-echo, sing-box]`
 
 ## MCP 优先架构
 
@@ -191,7 +207,7 @@ zigtester 是 MCP 的理想场景 — 大量原始测试输出在服务端解析
 
 # 怀疑改坏了
 "跑 zigoutbounds 的 functional"
-→ crypto-only 全过，E2E 需 sing-box（前置条件不满足时明确提示）
+→ crypto-only 全过，E2E 由 zigtester sing-box 插件自动管理（插件未安装时明确提示）
 
 # 改了基础库，全部验证
 "跑全部项目的单元测试"

@@ -1,7 +1,7 @@
 # Task Plan: zigtester MCP 替换兄弟项目 test skills
 
 > **创建**: 2026-08-07
-> **更新**: 2026-08-07 — zigoutbounds 暂缓（剧烈重构中），zigbox 先行试点
+> **更新**: 2026-08-08 — Task 1（生命周期管理清理）和 Task 2（TUN 测试迁移到 zigtun）完成
 > **关联**: DESIGN.md § MCP 优先架构
 
 ## Goal

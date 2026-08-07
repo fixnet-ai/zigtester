@@ -33,6 +33,7 @@ fixnet/
 4. **三路报告** — 终端 ANSI 彩色 / Markdown 表格 / JSON，覆盖人类阅读和 CI 对接
 5. **历史追踪** — 自动保存每次运行结果，支持性能回归检测（当前 vs 历史移动平均）
 6. **双层入口** — MCP Server（Claude Code 调用，服务端解析，节省 token）+ CLI（人类终端/CI）
+7. **插件管理** — 自动发现、构建、启动/停止测试依赖插件（echo server、sing-box 等），通过 `plugin.yaml` 声明生命周期
 
 ### 设计原则
 
@@ -69,7 +70,8 @@ config.py          ← 零依赖（仅标准库 + PyYAML）
 scanner.py         ← config
 metrics.py         ← config
 monitor.py         ← config
-runner.py          ← config + metrics + monitor
+plugin.py          ← config（插件发现、构建、启停）
+runner.py          ← config + metrics + monitor + plugin
 reporter.py        ← config + scanner
 history.py         ← config
 cli.py             ← 全部核心模块（用户入口）
@@ -128,6 +130,7 @@ python -m zigtester.server
 | `[mtr]` | metrics.py — 指标提取 |
 | `[mon]` | monitor.py — 资源监控 |
 | `[hist]` | history.py — 历史追踪 |
+| `[plg]` | plugin.py — 插件管理 |
 
 ## 内置输出解析器
 
@@ -144,9 +147,26 @@ python -m zigtester.server
 完整 JSON Schema 见 `schemas/zigtester.schema.json`。示例配置见各兄弟项目的 `zigtester.yaml`：
 
 - `../zigfoundation/zigtester.yaml` — 单层级（unit）
-- `../zigbox/zigtester.yaml` — 三层级（unit + functional + performance）
+- `../zigbox/zigtester.yaml` — 三层级（unit + functional + performance）+ `plugins: [local-echo]`
+- `../zigoutbounds/zigtester.yaml` — 四层级（unit + functional + performance + stress）+ `plugins: [local-echo, sing-box]`
+
+### plugins 字段
+
+项目可在 `zigtester.yaml` 中声明所需的测试依赖插件，zigtester 在测试前自动启动、测试后自动停止：
+
+```yaml
+plugins:
+  - local-echo                # 字符串格式（使用默认配置）
+  - name: sing-box            # 字典格式（可覆盖插件默认配置）
+    config:
+      ss_port: 18388
+```
+
+插件配置通过 `PLUGIN_<KEY>` 环境变量注入进程。插件定义位于 `zigtester/plugins/<name>/plugin.yaml`。
 
 ## 可插拔设计
+
+### 输出解析器扩展
 
 通过 `parser` 字段和 `metrics` 正则模式扩展，无需修改 zigtester 源码：
 
@@ -162,6 +182,27 @@ levels:
       thresholds:
         my_metric:
           min: 1000
+```
+
+### 测试依赖插件
+
+通过 `plugins/<name>/plugin.yaml` 定义可复用的测试依赖（echo server、sing-box 等），含构建命令、启动/停止生命周期、就绪检测：
+
+```yaml
+# plugins/local-echo/plugin.yaml
+name: local-echo
+build:
+  command: "true"              # 无需构建
+lifecycle:
+  start:
+    command: "python3 echo_server.py --tcp-port 13333"
+    timeout: 10
+    ready_on:
+      type: tcp
+      port: 13333
+  stop:
+    timeout: 5
+    kill: ["echo_server"]
 ```
 
 ## 设计文档

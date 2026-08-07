@@ -248,6 +248,39 @@ Hysteria2 和 TUIC 基于 QUIC 协议，使用 UDP 传输。端口检测时必�
 - **zigtun**：无 sing-box 依赖。
 - **experiment-hysteria2**：手动测试脚本使用 sing-box，但无自动化测试。
 
+### TUN 测试迁移：zigtun vs zigbox 职责分离（2026-08-07）
+
+TUN 功能测试从 zigbox 迁移到 zigtun（TUN 组件库），实现关注点分离：
+
+- **zigtun**（TUN 库）：TUN 设备创建/路由/数据包 I/O 的功能验证 → `tests/test_tun.py` → `zig-out/bin/zigtun-test`
+- **zigbox**（编排层）：仅 NOTUN 模式自动化测试，TUN 手动调试保留在 `test_tun.py`
+
+**决策理由**：zigtun 是 TUN 设备的库实现，TUN 设备级别的功能测试（创建、路由、I/O）应在其自身项目中验证。zigbox 作为编排层，不需要重复验证 TUN 设备本身。
+
+### zigbox test_all.py 简化（NOTUN-only）
+
+移除内容：
+- `--tun`/`--notun` CLI 参数
+- `STAT_FILE`、`HEALTH_THRESHOLDS`、`STAT_MAX_AGE_SEC` 常量
+- `check_health()` 函数（仅 TUN 模式使用 zigbox.stat）
+- `enable_tun` 参数从 `start_zigbox()` 移除
+
+步骤从 1-6 简化为 1-5（移除健康检查步骤）。
+
+### Zig 0.16.0 编译陷阱（zigtun test_main.zig）
+
+在编写 `zigtun/src/test_main.zig` 时遇到的 Zig 0.16.0 编译问题：
+
+| 问题 | 原因 | 修复 |
+|------|------|------|
+| `var opts` should be const | 0.16.0 强制不可变变量为 const | `var` → `const` |
+| `std.process.argsAlloc` 不存在 | 0.16.0 IO 重构移除 | `std.process.Init.Minimal` + `init.args.toSlice(allocator)` |
+| `std.fs.cwd()` 不存在 | 0.16.0 IO 重构移除 | 移除文件 I/O，使用硬编码默认值 |
+| `.ipv4`/`.ipv6` 不存在 | 0.16.0 改为 `.ip4`/`.ip6` | 更新 switch 分支 |
+| `Ip4Address` 不是 `[4]u8` | 0.16.0 改为结构体 | 使用 `.bytes` 字段提取原始字节 |
+| `tun.createTun()` 是 stub | 实际实现在 `createTunPlatform()`（mod.zig 私有函数） | 将 `createTunPlatform` 改为 `pub`，同时导入 `tun.zig`（类型）和 `mod.zig`（函数） |
+| `catch \|err\| { }` 块返回 void | catch 块返回类型必须匹配成功负载类型 | 改用 `if/else` 解构 error union |
+
 ## Visual/Browser Findings
 
 -
