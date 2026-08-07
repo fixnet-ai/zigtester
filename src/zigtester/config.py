@@ -295,9 +295,10 @@ def parse_config(path: str) -> ProjectConfig:
         if isinstance(p, str):
             plugins.append(PluginRef(name=p))
         elif isinstance(p, dict):
+            overrides = p.get("config")
             plugins.append(PluginRef(
                 name=str(p["name"]),
-                config=dict(p.get("config", {})),
+                config=dict(overrides) if isinstance(overrides, dict) else {},
             ))
         else:
             pass  # 忽略无效条目

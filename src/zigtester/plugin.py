@@ -66,6 +66,13 @@ def parse_plugin_config(plugin_dir: str) -> PluginConfig | None:
     name = str(raw.get("name", os.path.basename(plugin_dir)))
     description = str(raw.get("description", ""))
 
+    # 加载插件默认配置（后续可被项目级 zigtester.yaml 覆盖）
+    config_raw = raw.get("config")
+    if isinstance(config_raw, dict):
+        config = dict(config_raw)
+    else:
+        config = {}
+
     # build
     build_raw = raw.get("build", {})
     build = PluginBuild(
@@ -81,6 +88,7 @@ def parse_plugin_config(plugin_dir: str) -> PluginConfig | None:
             description=description,
             path=plugin_dir,
             build=build,
+            config=config,
             lifecycle=None,
         )
 
@@ -105,6 +113,7 @@ def parse_plugin_config(plugin_dir: str) -> PluginConfig | None:
         description=description,
         path=plugin_dir,
         build=build,
+        config=config,
         lifecycle=lifecycle,
     )
 
