@@ -120,7 +120,7 @@ def zigtester_run(
             return {"error": f"无效层级: {level}，有效值: {', '.join(VALID_LEVELS)}"}
         levels = [level]
 
-    pr = run_project(projects[0], levels)
+    pr = run_project(projects[0], levels, suite_filter=suite)
 
     # 保存历史
     try:

@@ -92,6 +92,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             target_projects[0], levels,
             fail_fast=args.fail_fast,
             no_build=args.no_build,
+            suite_filter=args.suite,
         )
         reporter.print_results(pr)
 
@@ -223,7 +224,7 @@ def main() -> None:
                        help="不递归扫描子目录")
     p_run.add_argument("--level", default="all",
                        help=f"测试层级，逗号分隔 ({', '.join(VALID_LEVELS)}, all)")
-    p_run.add_argument("--suite", help="运行指定套件（暂未实现）")
+    p_run.add_argument("--suite", help="仅运行指定套件（自动包含其依赖）")
     p_run.add_argument("--all", dest="all", action="store_true",
                        help="运行所有已发现项目")
     p_run.add_argument("--report-format", default="terminal",

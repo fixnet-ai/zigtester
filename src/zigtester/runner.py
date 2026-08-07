@@ -445,6 +445,7 @@ def run_project(
     levels: list[str],
     fail_fast: bool = False,
     no_build: bool = False,
+    suite_filter: str | None = None,
 ) -> ProjectResult:
     """执行单个项目的指定层级测试。
 
@@ -453,6 +454,7 @@ def run_project(
         levels: 要执行的层级名列表（空 = 全部）
         fail_fast: 首个失败即停止
         no_build: 跳过构建步骤
+        suite_filter: 仅运行指定名称的套件（可选）
 
     Returns:
         ProjectResult
@@ -519,6 +521,13 @@ def run_project(
             cycles = resolver.detect_cycle(level_cfg.suites)
             if cycles:
                 ordered = level_cfg.suites
+
+            # suite 过滤：仅运行指定套件及其依赖
+            if suite_filter is not None:
+                filtered = _filter_suites(ordered, suite_filter)
+                if not filtered:
+                    continue
+                ordered = filtered
 
             for suite in ordered:
                 suite_result = executor.execute(suite, work_dir)
@@ -661,3 +670,38 @@ def _run_build(build_command: str, work_dir: str) -> None:
         )
     except Exception:
         pass  # 构建失败不阻止测试
+
+
+def _filter_suites(
+    suites: list[SuiteConfig], target_name: str
+) -> list[SuiteConfig]:
+    """过滤套件列表，仅保留目标套件及其传递依赖。
+
+    依赖使用 "level.name" 或 "name" 格式。过滤后的列表保持依赖顺序。
+    如果目标不存在，返回空列表。
+    """
+    # 建立 name → SuiteConfig 索引
+    by_name: dict[str, SuiteConfig] = {s.name: s for s in suites}
+
+    # 查找目标套件
+    if target_name not in by_name:
+        return []
+
+    # 递归收集依赖（传递闭包）
+    needed: set[str] = set()
+
+    def collect(name: str) -> None:
+        if name in needed:
+            return
+        needed.add(name)
+        suite = by_name.get(name)
+        if suite is not None:
+            for dep in suite.depends_on:
+                dep_name = dep.split(".", 1)[1] if "." in dep else dep
+                if dep_name in by_name:
+                    collect(dep_name)
+
+    collect(target_name)
+
+    # 按原始顺序返回需要的套件
+    return [s for s in suites if s.name in needed]
