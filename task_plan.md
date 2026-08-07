@@ -10,7 +10,7 @@
 
 ## Current Phase
 
-Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅ | Phase 4 ⏸️ | Phase 5 ⏸️
+Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅ | Phase 4 ✅ | Phase 5 ⏸️
 
 ## Phases
 
@@ -41,14 +41,14 @@ Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅ | Phase 4 ⏸️ | Phase 5 ⏸️
 - **Status:** complete
 
 ### Phase 4: zigoutbounds skill 替换（等重构完成后）
-- [ ] 等待 zigoutbounds 重构稳定
-- [ ] 为 zigoutbounds 生成 `zigtester.yaml`
-- [ ] 将 KEY=VALUE 输出格式约定迁移到 zigoutbounds CLAUDE.md
-- [ ] 将协议开发 6 步流程保留在 CLAUDE.md § 开发流程
-- [ ] 将黄金法则"Go 先通，Zig 后写"保留在 CLAUDE.md
-- [ ] `.claude/skills/tests/SKILL.md` → 精简为 stub
-- [ ] `.claude/skills/outbound-dev/SKILL.md` → 保留 6 步流程 + 黄金法则，删除测试命令部分
-- **Status:** pending
+- [x] 等待 zigoutbounds 重构稳定
+- [x] 为 zigoutbounds 生成 `zigtester.yaml`（11 套件：unit×1 + functional×7 + performance×3）
+- [x] 将 KEY=VALUE 输出格式约定迁移到 zigoutbounds CLAUDE.md
+- [x] 将协议开发流程（含可行性评估 5 问 + UDP 架构 + 常见陷阱）迁移到 CLAUDE.md
+- [x] 将黄金法则"Go 先通，Zig 后写"保留在 CLAUDE.md（已存在）
+- [x] `.claude/skills/tests/SKILL.md` → 精简为 stub（14K → 1.5K，-89%）
+- [x] `.claude/skills/outbound-dev/SKILL.md` → **删除**（内容全部迁入 CLAUDE.md）
+- **Status:** complete
 
 ### Phase 5: 最终验证
 - [ ] `zigtester scan` 发现全部项目

@@ -40,7 +40,13 @@
 - **zigproxy ✅** — CLAUDE.md 添加 `## 测试` 节
 
 ### Phase 4: zigoutbounds skill 替换（等重构完成后）
-- **Status:** pending
+- **Status:** complete ✅
+- 重构已稳定（ProtocolClient + Session 统一完成）
+- **zigtester.yaml** ✅ — 11 套件（unit×1 + functional×7 + performance×3）
+- **outbound-dev skill** ✅ — 删除，内容迁入 CLAUDE.md（可行性评估、UDP 架构、执行模型、常见陷阱）
+- **tests skill** ✅ — 14K → 1.5K stub（MCP 速查 + E2E 前置条件 + 故障排查）
+- **Token 节省**：21K → 1.5K（**-93%**）
+- zigbox tests/SKILL.md 3 处引用已更新（指向 CLAUDE.md）
 
 ### Phase 5: 最终验证
 - **Status:** pending
@@ -65,8 +71,8 @@
 
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 1-3 全部完成，Phase 4 暂缓，Phase 5 待启动 |
-| Where am I going? | 等 zigoutbounds 重构完成后启动 Phase 4→5 |
+| Where am I? | Phase 1-4 全部完成，仅剩 Phase 5 最终验证 |
+| Where am I going? | Phase 5：token 实测 + 全项目回归验证 |
 | What's the goal? | 用 zigtester MCP 替换兄弟项目测试 skill，token -69% |
-| What have I learned? | zigbox 试点 -83%；5 项目全接入仅需 unit 层级；并行 5.5s 完成全部 |
-| What have I done? | Phase 1-3：zigbox 试点 + 5 项目 zigtester.yaml + 4 项目 CLAUDE.md 测试节 |
+| What have I learned? | outbound-dev 直接删除（CLAUDE.md 已覆盖）；zigoutbounds 最复杂但省最多(-93%) |
+| What have I done? | 6 项目 zigtester.yaml + 5 项目 CLAUDE.md 测试节 + 2 skill 删除 + 2 skill 精简 |
