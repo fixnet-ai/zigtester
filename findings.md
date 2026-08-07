@@ -232,6 +232,7 @@ zigoutbounds 有 **3 个独立的 SingboxProcess 实现**，大量重复代码�
 - singbox_all_inbounds.json 独有：socks(2081), http(2082), hysteria2-alt(16802) — 3 个
 - experiment-hysteria2 独有：hysteria2-salamander(16804) — 1 个
 - 合计 12 inbound，0 端口冲突
+	- **后续简化 (2026-08-07)**：移除 socks(2081) 和 http(2082) — mixed:2080 已同时支持 SOCKS5+HTTP 代理。统一配置现为 10 inbound 双栈（`"listen": "::"`）。
 
 #### Hysteria2/TUIC 使用 UDP
 

@@ -109,11 +109,11 @@
 - **完成项:**
   - [x] 调研：6 项目 sing-box 使用分析（仅 zigoutbounds 实际使用，zigbox 不涉及）
   - [x] TLS 证书迁移：`zigoutbounds → plugins/sing-box/certs/`（localhost.crt/key + test-localhost.crt/key）
-  - [x] `configs/test_server.json` — 统一配置文件（12 inbound + clash_api + direct outbound）
+  - [x] `configs/test_server.json` — 统一配置文件（10 inbound + clash_api + direct outbound，双栈 ::）
   - [x] `configs/base.json` — 修正 `experimental.clash_api` 嵌套格式
   - [x] `singbox_ctl.py` — serve 模式直接用 test_server.json 启动（移除无效的热重载）
   - [x] `plugin.yaml` — 完整端口默认配置 + 简化启动命令
-  - [x] 验证：13 端口全部正常（TCP: 2080/2081/2082/8388/9443/16800/16801, UDP: 5354/8388/10443/16802/16803/16804）
+  - [x] 验证：10 端口全部正常（TCP: 2080/8388/9443/16800/16801, UDP: 5354/10443/16802/16803/16804；2081/2082 已移除，mixed:2080 覆盖 SOCKS5+HTTP）
 - **关键发现:**
   - sing-box Clash API `PUT /configs` 只接受 Clash 格式配置，不支持原生格式热重载
   - Hysteria2/TUIC 是 QUIC/UDP 协议，需用 `lsof -iUDP` 检测而非 TCP
@@ -121,9 +121,7 @@
 - **统一配置端口分配:**
   | 端口 | 协议 | 传输 | 来源 |
   |------|------|------|------|
-  | 2080 | mixed | TCP | test + all_inbounds |
-  | 2081 | socks | TCP | all_inbounds |
-  | 2082 | http | TCP | all_inbounds |
+  | 2080 | mixed (SOCKS5+HTTP) | TCP | 统一双端口合一 |
   | 5354 | direct (DNS) | UDP | test |
   | 8388 | SS2022 | TCP+UDP | 所有测试 |
   | 9443 | trojan | TCP | 所有测试 |
@@ -133,6 +131,7 @@
   | 16802 | hysteria2 (alt) | UDP | all_inbounds |
   | 16803 | tuic | UDP | all_inbounds |
   | 16804 | hysteria2+salamander | UDP | experiment |
+  - socks(2081) 和 http(2082) 已移除，mixed:2080 已同时支持 SOCKS5 和 HTTP 代理协议
 - **待后续 (P7.4):** zigoutbounds 测试脚本迁移到 SingboxController
 
 ## Test Results
