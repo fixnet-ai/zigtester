@@ -3,7 +3,7 @@
 
 完全复刻 zigbox/src/local-echo.zig 的功能，使用 Python asyncio 实现：
   - TCP Echo（默认 :13333）— 协议自适应（SOCKS5 / HTTP CONNECT / HTTP）
-  - DNS Echo（默认 :5353）— 选择性 DNS 代理（测试域名→FakeIP，其余→上游转发）
+  - DNS Echo（默认 127.0.0.1:53，需 sudo）— 选择性 DNS 代理（测试域名→FakeIP，其余→上游转发）
 
 设计原则:
   - 启动即服务，无生命周期状态管理 — 进程活着就服务
@@ -13,7 +13,7 @@
 
 用法:
   python3 echo_server.py [--tcp-host ::] [--tcp-port 13333]
-                         [--dns-port 5353] [--upstream-dns 8.8.8.8]
+                         [--dns-port 53] [--upstream-dns 8.8.8.8]
                          [--no-dns] [--quiet]
 """
 
@@ -442,23 +442,26 @@ class EchoServer:
             except OSError as e:
                 logger.debug(f"[echo] tcp bind skipped {host}:{self.tcp_port}: {e}")
 
-        # DNS echo
+        # DNS echo — 绑定 127.0.0.1，用 SO_REUSEADDR 避免 mDNSResponder（*:53）冲突
         if not self.no_dns:
             try:
+                dns_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                dns_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                dns_sock.bind(("127.0.0.1", self.dns_port))
                 transport, protocol = await loop.create_datagram_endpoint(
                     lambda: DnsEchoProtocol(self.upstream_dns),
-                    local_addr=("0.0.0.0", self.dns_port),
+                    sock=dns_sock,
                 )
                 self._dns_transport = transport
                 self._dns_protocol = protocol
                 logger.info(
-                    f"[dns.echo] dns echo listening: port={self.dns_port} "
+                    f"[dns.echo] dns echo listening: 127.0.0.1:{self.dns_port} "
                     f"upstream={self.upstream_dns}:53"
                 )
             except OSError as e:
                 logger.warning(
                     f"[dns.echo] DNS echo skipped — port {self.dns_port} "
-                    f"unavailable: {e}"
+                    f"unavailable (try sudo): {e}"
                 )
 
         logger.info("[echo] ready")
@@ -528,8 +531,8 @@ def main() -> None:
         help="TCP echo 监听端口 (默认: 13333)"
     )
     parser.add_argument(
-        "--dns-port", type=int, default=15353,
-        help="DNS echo 监听端口 (默认: 15353, 避免 macOS mDNSResponder 冲突)"
+        "--dns-port", type=int, default=53,
+        help="DNS echo 监听端口 (默认: 53，绑定 127.0.0.1，需 sudo)"
     )
     parser.add_argument(
         "--upstream-dns", default="8.8.8.8",

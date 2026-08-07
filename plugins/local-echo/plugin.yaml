@@ -4,7 +4,7 @@ build:
   command: "true"
 lifecycle:
   start:
-    command: "python3 echo_server.py"
+    command: "sudo python3 echo_server.py --tcp-port 13333 --dns-port 53"
     timeout: 10
     ready_on:
       type: tcp
