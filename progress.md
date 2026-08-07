@@ -2,6 +2,16 @@
 
 ## Session: 2026-08-08
 
+### MCP Server stdio → HTTP transport 迁移 ✅
+- **Status:** complete
+- Actions taken:
+  - `server.py` — `mcp.run()` → `mcp.run(transport="http", host="127.0.0.1", port=9020)`
+  - 新增 PID 文件管理（`~/.zigtester/server.pid`，启动写入、退出清理）
+  - `~/.claude.json` — zigtester 从 stdio command 改为 `{"type":"http","url":"http://127.0.0.1:9020/mcp"}`
+  - `CLAUDE.md` + `README.md` — 文档更新
+- Root cause: stdio transport 下 MCP Server 生命周期由 Claude Code 管理，重启时旧进程未正确终止，累积 3 个僵尸进程。HTTP transport 端口绑定天然互斥，从物理上杜绝多实例。
+- Fix verified: 单进程运行，`/mcp` 端点正常响应
+
 ### suite 过滤实现 ✅
 - **Status:** complete
 - Actions taken:

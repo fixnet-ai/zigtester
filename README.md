@@ -166,14 +166,18 @@ zigtester 是 MCP 的理想场景 — 大量原始测试输出在服务端解析
 
 ### 配置 MCP Server
 
-```json
+zigtester MCP Server 使用 HTTP transport（端口绑定天然互斥，杜绝 stdio 多实例问题）：
+
+```bash
+# 1. 启动 HTTP Server（常驻后台）
+ZIGTESTER_ROOT=/path/to/workspace python -m zigtester.server &
+# → http://127.0.0.1:9020/mcp  (PID 文件 ~/.zigtester/server.pid)
+
+# 2. Claude Code MCP 配置（~/.claude.json 的 mcpServers 段）
 {
-  "mcpServers": {
-    "zigtester": {
-      "command": "python3",
-      "args": ["-m", "zigtester.server"],
-      "env": {"ZIGTESTER_ROOT": "/path/to/workspace"}
-    }
+  "zigtester": {
+    "type": "http",
+    "url": "http://127.0.0.1:9020/mcp"
   }
 }
 ```

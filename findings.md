@@ -295,6 +295,23 @@ TUN 功能测试从 zigbox 迁移到 zigtun（TUN 组件库），实现关注点
 
 **合并语义**：插件默认配置（`plugin.yaml` `config:`）→ 项目覆盖配置（zigtester.yaml 中 dict 格式插件的 `config:`）→ `PLUGIN_<KEY>` 环境变量
 
+### MCP stdio transport 多实例问题 (2026-08-08)
+
+**现象**：多次"重启"MCP Server 后，`ps aux | grep zigtester.server` 发现 3 个进程同时运行（不同 PID，不同启动时间）。旧进程没有被终止，每次重启只是增加新进程。
+
+**根因**：stdio transport 下 MCP Server 的生命周期由 Claude Code 管理——启动新进程和终止旧进程之间没有原子性保证。旧进程的 stdin 未关闭，继续阻塞在 `mcp.run()` 上等待输入，成为僵尸进程。
+
+**影响**：
+- MCP 调用可能连接到旧进程（未加载最新代码），导致 bug 修复看似"不生效"
+- 资源泄漏（每个 Python 进程 ~30MB）
+- 难以排查——错误行为取决于 MCP 路由到哪个进程
+
+**解决方案**：切换到 HTTP transport（`mcp.run(transport="http", host="127.0.0.1", port=9020)`）。端口绑定天然互斥——第二个实例启动时直接报 `Address already in use`，物理上不可能出现多实例。同时添加 PID 文件（`~/.zigtester/server.pid`）用于健康检查和优雅关闭追踪。
+
+**配置变更**（`~/.claude.json` 的 `mcpServers.zigtester`）：
+- 旧：`{"type":"stdio","command":"python3","args":["-m","zigtester.server"],"env":{...}}`
+- 新：`{"type":"http","url":"http://127.0.0.1:9020/mcp"}`
+
 ## Visual/Browser Findings
 
 -

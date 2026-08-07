@@ -115,8 +115,9 @@ zigtester history zigfoundation all-tests
 python -m zigtester scan --dir ~/works/2025/fixnet
 python -m zigtester run zigfoundation --level unit
 
-# MCP Server 启动（供 Claude Code 调用）
-python -m zigtester.server
+# MCP Server 启动（HTTP transport，常驻后台，端口绑定避免多实例）
+ZIGTESTER_ROOT=~/works/2025/fixnet python -m zigtester.server &
+# 启动后监听 http://127.0.0.1:9020/mcp，PID 文件 ~/.zigtester/server.pid
 ```
 
 ## 组件标识
