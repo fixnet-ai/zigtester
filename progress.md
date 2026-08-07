@@ -75,7 +75,8 @@
     - `tests/test_bench.py` — 移除 local_echo 参数
     - `tests/test_tun.py` — 移除 local_echo=True
     - `tests/test_all.py` — 移除 --local-echo flag
-  - echo_server.py DNS 默认端口 5353→15353（避免 macOS mDNSResponder）
+  - echo_server.py DNS 端口改为 53（SO_REUSEADDR 绑定 127.0.0.1，与 mDNSResponder 共存）
+  - ensure_echo_server() 智能判断：root→启用 DNS；非 root→--no-dns（TCP only）
 - Verification:
   - `zig build` ✅ | `zig build test` ✅
   - `python3 tests/test_protocols.py` → 8/8 passed ✅
