@@ -281,6 +281,20 @@ TUN 功能测试从 zigbox 迁移到 zigtun（TUN 组件库），实现关注点
 | `tun.createTun()` 是 stub | 实际实现在 `createTunPlatform()`（mod.zig 私有函数） | 将 `createTunPlatform` 改为 `pub`，同时导入 `tun.zig`（类型）和 `mod.zig`（函数） |
 | `catch \|err\| { }` 块返回 void | catch 块返回类型必须匹配成功负载类型 | 改用 `if/else` 解构 error union |
 
+### plugin.yaml `config:` 段被静默忽略 (2026-08-08)
+
+**问题**：`parse_plugin_config()` 解析 `plugin.yaml` 时没有读取 `config:` 段，导致 `PluginConfig.config` 始终为 `{}`。这意味着 `start_plugin()` 不会设置任何 `PLUGIN_*` 环境变量，插件的启动脚本只能靠自身硬编码默认值。
+
+**根因**：`parse_plugin_config()` 在两处 `return PluginConfig(...)` 中都没有包含 `config=...` 参数。`plugin.yaml` 中定义的 `config:` 段（如 sing-box 的 13 个默认端口配置）被 yaml.safe_load 解析后直接丢弃。
+
+**影响**：sing-box 插件启动时缺少 `PLUGIN_API_LISTEN`、`PLUGIN_ECHO_PORT`、`PLUGIN_SS_PORT` 等环境变量。虽然 singbox_ctl.py 有自身默认值，但 zigtester 完全失去了对插件端口配置的控制力。项目级 `zigtester.yaml` 中的插件配置覆盖也无法与默认配置合并。
+
+**修复**（`plugin.py` + `config.py`）：
+1. `parse_plugin_config()` — 读取 `config:` 段，通过 `config=config` 传入 `PluginConfig`
+2. `parse_config()` — `dict(p.get("config", {}))` → `dict(overrides) if isinstance(overrides, dict) else {}`，防御 YAML 中 `config: null` 导致的 TypeError
+
+**合并语义**：插件默认配置（`plugin.yaml` `config:`）→ 项目覆盖配置（zigtester.yaml 中 dict 格式插件的 `config:`）→ `PLUGIN_<KEY>` 环境变量
+
 ## Visual/Browser Findings
 
 -

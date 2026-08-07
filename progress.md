@@ -1,5 +1,15 @@
 # Progress Log
 
+## Session: 2026-08-08
+
+### 插件 config 解析修复 ✅
+- **Status:** complete
+- Actions taken:
+  - `plugin.py` `parse_plugin_config()` — 读取 `plugin.yaml` 的 `config:` 段，传入 `PluginConfig`
+  - `config.py` `parse_config()` — 防御 `config: null` 导致的 `dict(None)` TypeError
+- Root cause: `parse_plugin_config()` 在两处 `return PluginConfig(...)` 中都没有包含 `config=...` 参数，plugin.yaml 的 config 段被静默丢弃，PluginConfig.config 始终为 {}
+- Fix verified: sing-box 插件 13 个默认端口全部正确加载；项目级覆盖正确合并（默认 → 覆盖 → PLUGIN_* env）
+
 ## Session: 2026-08-07
 
 ### Task 1: 生命周期管理审计与清理 ✅
