@@ -2,6 +2,15 @@
 
 ## Session: 2026-08-08
 
+### suite 过滤实现 ✅
+- **Status:** complete
+- Actions taken:
+  - `runner.py` `run_project()` — 新增 `suite_filter` 参数，`_filter_suites()` 递归解析传递依赖
+  - `cli.py` `cmd_run()` — `args.suite` 传递给 `run_project()`，help 文本更新
+  - `server.py` `zigtester_run()` — `suite` 参数传递给 `run_project()`
+- Root cause: `--suite` 参数被解析但从未使用（help 文本明确写了"暂未实现"），MCP `suite` 参数同样被忽略
+- Fix verified: `--suite crypto-ss2022` 只跑 1 个；`--suite e2e-ss2022` 递归包含依赖跑 2 个；不存在的套件返回 0 个不崩溃；无 `--suite` 8 个全部（回归通过）
+
 ### 插件 config 解析修复 ✅
 - **Status:** complete
 - Actions taken:
