@@ -164,6 +164,44 @@ zigtester 是 MCP 的理想场景 — 大量原始测试输出在服务端解析
 
 配置后 Claude Code 可直接调用上述工具。MCP Server 在服务端解析原始测试输出，只返回结构化摘要，大幅节省 token。
 
+### 日常使用
+
+在 Claude Code 中直接用自然语言，MCP 自动执行。以 zigoutbounds 开发为例：
+
+| 场景 | 说什么 |
+|------|--------|
+| 改代码前验证基线 | "跑 xxx 的单元测试" |
+| 改代码后快速反馈 | "跑 xxx 的单元测试" |
+| 怀疑性能退化 | "看 xxx 的 bench 有没有变慢" |
+| 改了基础库（zigfoundation） | "跑全部项目的单元测试" |
+| 不知道有什么测试 | "xxx 有哪些测试" |
+
+**不需要记命令，不需要开终端，不需要切目录。**
+
+典型工作流：
+
+```
+# 开发前看有什么测试
+"zigoutbounds 有哪些测试"
+→ 列出 11 套件：unit×1 + functional×7 + performance×3
+
+# 改代码后验证
+"跑 zigoutbounds 的单元测试"
+→ 1/1 passed，0.2s（自动记录历史）
+
+# 怀疑改坏了
+"跑 zigoutbounds 的 functional"
+→ crypto-only 全过，E2E 需 sing-box（前置条件不满足时明确提示）
+
+# 改了基础库，全部验证
+"跑全部项目的单元测试"
+→ 6 项目并行 ~6s，全部通过
+
+# 检查是否变慢
+"看 zigoutbounds bench-ss2022 有没有变慢"
+→ 当前 520 req/s vs 历史 535 req/s，-2.8%（无回归）
+```
+
 ### CLI 辅助
 
 MCP Server 供 Claude Code 调用，CLI 供人类终端和 CI/CD 使用，两者共享同一套核心模块：
