@@ -185,6 +185,10 @@ class MetricExtractor:
             (r"p50:\s*([0-9.]+)\s*ms", "latency_p50_ms"),
             (r"p95:\s*([0-9.]+)\s*ms", "latency_p95_ms"),
             (r"p99:\s*([0-9.]+)\s*ms", "latency_p99_ms"),
+            # 无 ms 后缀的格式（微秒或独立数字），用负向前瞻排除 ms 后缀
+            (r"p50:\s+([0-9.]+)(?!\s*ms)", "latency_p50_raw"),
+            (r"p95:\s+([0-9.]+)(?!\s*ms)", "latency_p95_raw"),
+            (r"p99:\s+([0-9.]+)(?!\s*ms)", "latency_p99_raw"),
             (r"错误:\s*([0-9]+)", "error_count"),
             (r"成功:\s*([0-9]+)", "success_count"),
             (r"总计:\s*([0-9]+)", "total_requests"),

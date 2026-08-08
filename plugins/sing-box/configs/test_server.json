@@ -40,6 +40,7 @@
 //   :16802 hysteria2   — Hysteria2 (QUIC) 副端口
 //   :16803 tuic        — TUIC v5 (QUIC)
 //   :16804 hysteria2   — Hysteria2 + Salamander 混淆
+//   (16805 reserved for gecko obfs — requires sing-box 1.14+)
 
 {
   "log": {

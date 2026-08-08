@@ -24,8 +24,29 @@ _DEFAULT_PORT = 9020
 mcp = FastMCP("zigtester")
 
 
-def _default_dir() -> str:
-    return os.environ.get("ZIGTESTER_ROOT", os.getcwd())
+# ── 辅助 ──────────────────────────────────────────────────
+
+
+def _load_project(dir: str | None) -> "DiscoveredProject | None":
+    """从 dir 向上查找 zigtester.yaml 并加载为 DiscoveredProject。
+
+    不传 dir 则使用当前工作目录。找不到返回 None。
+    """
+    from .config import parse_config
+    from .scanner import DiscoveredProject, find_config
+
+    target = dir or os.getcwd()
+    config_path = find_config(target)
+    if config_path is None:
+        return None
+
+    cfg = parse_config(config_path)
+    return DiscoveredProject(
+        name=cfg.project,
+        path=os.path.dirname(config_path),
+        config_path=config_path,
+        config=cfg,
+    )
 
 
 # ── 工具 ──────────────────────────────────────────────────
@@ -33,14 +54,18 @@ def _default_dir() -> str:
 
 @mcp.tool()
 def zigtester_scan(dir: str | None = None) -> dict:
-    """发现所有包含 zigtester.yaml 的项目。
+    """发现目录树下所有包含 zigtester.yaml 的项目（辅助工具）。
+
+    仅在不确定有哪些项目时使用一此，了解项目名后直接用
+    zigtester_list / zigtester_run + 项目目录路径即可，
+    不需要每次都 scan。
 
     Args:
-        dir: 扫描根目录，默认从 ZIGTESTER_ROOT 环境变量或当前目录
+        dir: 扫描根目录，默认当前目录
     """
     from .scanner import discover
 
-    root = dir or _default_dir()
+    root = dir or os.getcwd()
     projects = discover(root)
 
     return {
@@ -59,21 +84,20 @@ def zigtester_scan(dir: str | None = None) -> dict:
 
 
 @mcp.tool()
-def zigtester_list(project: str) -> dict:
+def zigtester_list(dir: str | None = None) -> dict:
     """列出项目中的所有测试套件。
 
+    dir 指向项目目录（或其任意子目录），工具自动向上查找
+    zigtester.yaml。不传则用当前目录。
+
     Args:
-        project: 项目名
+        dir: 项目目录路径（或其子目录），默认当前目录
     """
-    from .scanner import discover
+    p = _load_project(dir)
 
-    root = _default_dir()
-    projects = [p for p in discover(root) if p.name == project]
+    if p is None:
+        return {"error": f"在 {dir or os.getcwd()} 及其父目录中未找到 zigtester.yaml"}
 
-    if not projects:
-        return {"error": f"未找到项目: {project}"}
-
-    p = projects[0]
     levels: dict[str, list[dict]] = {}
     for name, lc in p.config.levels.items():
         if lc.suites:
@@ -99,29 +123,31 @@ def zigtester_list(project: str) -> dict:
 
 @mcp.tool()
 def zigtester_run(
-    project: str,
     level: str = "all",
     suite: str | None = None,
+    dir: str | None = None,
 ) -> dict:
     """执行测试并返回结构化结果。
 
-    服务端解析原始 stdout/stderr，只返回结构化摘要 —
-    不将大量原始输出传给 Claude，大幅节省 token。
+    dir 指向项目目录（或其任意子目录），工具自动向上查找
+    zigtester.yaml。不传则用当前目录。
+
+    返回的 `report` 字段是预格式化的 Markdown 表格，**必须原样展示给用户**，
+    不要改写、摘抄或重新排版。
 
     Args:
-        project: 项目名
         level: 测试层级 (unit/functional/performance/stress/all)，默认 all
         suite: 指定套件名（可选，不指定则运行该层级所有套件）
+        dir: 项目目录路径（或其子目录），默认当前目录
     """
     from .config import VALID_LEVELS
+    from .reporter import Reporter
     from .runner import run_project
-    from .scanner import discover
 
-    root = _default_dir()
-    projects = [p for p in discover(root) if p.name == project]
+    p = _load_project(dir)
 
-    if not projects:
-        return {"error": f"未找到项目: {project}"}
+    if p is None:
+        return {"error": f"在 {dir or os.getcwd()} 及其父目录中未找到 zigtester.yaml"}
 
     levels = []
     if level != "all":
@@ -129,7 +155,7 @@ def zigtester_run(
             return {"error": f"无效层级: {level}，有效值: {', '.join(VALID_LEVELS)}"}
         levels = [level]
 
-    pr = run_project(projects[0], levels, suite_filter=suite)
+    pr = run_project(p, levels, suite_filter=suite)
 
     # 保存历史
     try:
@@ -153,7 +179,6 @@ def zigtester_run(
         # 仅失败时包含 stderr 摘要（最多 500 字符）
         if s.status in ("FAIL", "ERROR") and s.stderr:
             entry["stderr_tail"] = s.stderr[-500:]
-        # 生命周期错误
         if s.setup_error:
             entry["setup_error"] = s.setup_error
         if s.teardown_error:
@@ -185,6 +210,7 @@ def zigtester_run(
             "errors": all_err,
         },
         "suites": suites_out,
+        "report": Reporter.compact_markdown(pr),
     }
 
 

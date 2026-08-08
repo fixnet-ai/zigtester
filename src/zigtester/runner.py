@@ -404,7 +404,7 @@ class TestExecutor:
         if result.exit_code is not None and result.exit_code != 0:
             parts.append(f"exit={result.exit_code}")
 
-        # 内置指标摘要
+        # zig_test / test_protocols 类指标
         if m.get("tests_total", 0) > 0:
             parts.append(
                 f"{int(m['tests_passed'])}/{int(m['tests_total'])} passed"
@@ -413,6 +413,21 @@ class TestExecutor:
                 parts.append(f"{int(m['tests_skipped'])} skipped")
             if m.get("tests_failed", 0) > 0:
                 parts.append(f"{int(m['tests_failed'])} failed")
+
+        # bench 类指标
+        tp = m.get("throughput_reqs_per_sec", 0)
+        if tp > 0:
+            parts.append(f"{tp:.0f} req/s")
+        p99 = m.get("latency_p99_ms", 0)
+        # fallback: 无 ms 后缀的延迟（可能是微秒，>100 时自动转换）
+        if p99 == 0:
+            p99_raw = m.get("latency_p99_raw", 0)
+            if p99_raw > 100:
+                p99 = p99_raw / 1000  # 微秒 → 毫秒
+            else:
+                p99 = p99_raw
+        if p99 > 0:
+            parts.append(f"p99={p99:.1f}ms")
 
         if result.status == "PASS" and not parts:
             parts.append("exit=0")

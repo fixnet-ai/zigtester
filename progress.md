@@ -222,3 +222,14 @@
 | What's the goal? | 构建测试环境生命周期管理，消除 setup/teardown 的 ad-hoc 实现，将测试基础设施从生产代码中分离 |
 | What have I learned? | 5 个流畅性问题的根因是同一个架构缺失——zigtester 没有生命周期管理。逐个修补解决不了根本问题。local-echo.zig 寄生在 zigbox 生产代码中是反模式，应作为 zigtester 插件管理。 |
 | What have I done? | 6 项目接入 + 测试脚本 5 项修复 + 根因分析 + Phase 6 重新设计 |
+
+---
+
+## 2026-08-08: v0.21.0 — 统一版本发布
+
+- MCP Server stdio → HTTP transport 迁移（端口绑定互斥，杜绝僵尸进程）
+- suite 过滤实现（`--suite` 参数递归解析传递依赖）
+- 插件 config 解析修复（plugin.yaml config 段被静默丢弃的 bug）
+- sing-box test_server.json 新增 Hysteria2 配置（端口 10443）
+
+全项目统一版本发布：包含 zigfoundation、zigtun、zigproxy、zigdns、zigoutbounds、zigbox 所有 v0.21.0 同步更新。

@@ -362,6 +362,100 @@ class Reporter:
             f.write(self.to_json(result))
         print(f"  报告已保存: {path}")
 
+    # ── 紧凑 Markdown 表格（MCP 专用）──────────────────────
+
+    @staticmethod
+    def compact_markdown(result: ProjectResult) -> str:
+        """生成固定格式的紧凑 Markdown 表格 — 保证 MCP 人类可读性一致。
+
+        每次 zigtester_run 返回此字段，Claude Code 直接渲染 markdown
+        表格，格式完全由服务端控制，不依赖模型排版。
+        """
+        elapsed = result.finished_at - result.started_at
+        pass_n = sum(1 for s in result.suites if s.status == "PASS")
+        fail_n = sum(1 for s in result.suites if s.status == "FAIL")
+        err_n = sum(1 for s in result.suites if s.status == "ERROR")
+        skip_n = sum(1 for s in result.suites if s.status == "SKIP")
+        all_ok = fail_n == 0 and err_n == 0
+        icon = "✅" if all_ok else "❌"
+
+        now = datetime.now(_CST).strftime("%Y-%m-%d %H:%M:%S")
+
+        lines = [
+            f"## {result.project} — 测试报告 {icon}",
+            "",
+            f"> {now} CST | 总耗时 {elapsed:.1f}s | "
+            f"通过 {pass_n} | 失败 {fail_n} | 错误 {err_n} | 跳过 {skip_n}",
+            "",
+            "| 层级 | 套件 | 状态 | 耗时 | 关键指标 |",
+            "|------|------|------|------|----------|",
+        ]
+
+        for s in result.suites:
+            icon_s = _STATUS_ICONS.get(s.status, "?")
+            emoji = {"PASS": "✅", "FAIL": "❌", "SKIP": "○", "ERROR": "⚠"}.get(
+                s.status, "?"
+            )
+            # 耗时格式化
+            if s.duration_ms >= 1000:
+                dur_str = f"{s.duration_ms / 1000:.1f}s"
+            elif s.duration_ms > 0:
+                dur_str = f"{s.duration_ms:.0f}ms"
+            else:
+                dur_str = "-"
+
+            # 关键指标：优先用 message，fallback 到退出码
+            key = s.message.strip() if s.message else f"exit={s.exit_code}"
+
+            # 拼接 setup/teardown 警告
+            notes = ""
+            if s.setup_error:
+                notes += f" ⚠setup"
+            if s.teardown_error:
+                notes += f" ⚠teardown"
+
+            lines.append(
+                f"| {s.level} | {s.suite_name} | {emoji} {s.status} | {dur_str} | {key}{notes} |"
+            )
+
+        lines.append("")
+
+        # 汇总行
+        total = len(result.suites)
+        if all_ok and total > 0:
+            lines.append(f"**结果**: {total}/{total} ✅ 全部通过")
+        else:
+            parts = [f"{pass_n} 通过"]
+            if fail_n > 0:
+                parts.append(f"{fail_n} 失败 ❌")
+            if err_n > 0:
+                parts.append(f"{err_n} 错误 ⚠")
+            if skip_n > 0:
+                parts.append(f"{skip_n} 跳过")
+            lines.append(f"**结果**: {total} 套件 | " + " | ".join(parts))
+
+        # 失败详情（仅失败/错误时展示）
+        for s in result.suites:
+            if s.status in ("FAIL", "ERROR"):
+                detail = s.message.strip() if s.message else f"exit={s.exit_code}"
+                lines.append(f"- 🔴 **{s.suite_name}** [{s.level}]: {detail}")
+                if s.setup_error:
+                    lines.append(f"  - setup 错误: {s.setup_error}")
+                if s.teardown_error:
+                    lines.append(f"  - teardown 错误: {s.teardown_error}")
+                if s.stderr.strip():
+                    # 仅包含 stderr 尾部的关键行（最多 5 行）
+                    stderr_lines = s.stderr.strip().splitlines()
+                    relevant = [l for l in stderr_lines if l.strip()][-5:]
+                    if relevant:
+                        lines.append(f"  - stderr 尾部:")
+                        lines.append("    ```")
+                        for rl in relevant:
+                            lines.append(f"    {rl}")
+                        lines.append("    ```")
+
+        return "\n".join(lines)
+
     # ── 历史 ───────────────────────────────────────────────
 
     def print_history(
