@@ -156,6 +156,33 @@
       }
     },
     {
+      "tag": "vless-flow-in",
+      "listen": "127.0.0.1",
+      "port": __VLESS_FLOW_PORT__,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "__VLESS_UUID__",
+            "flow": "xtls-rprx-vision"
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "certs/localhost.crt",
+              "keyFile": "certs/localhost.key"
+            }
+          ]
+        }
+      }
+    },
+    {
       "tag": "vless-reality-in",
       "listen": "127.0.0.1",
       "port": __VLESS_REALITY_PORT__,

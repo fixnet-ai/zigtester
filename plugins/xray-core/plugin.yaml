@@ -11,6 +11,7 @@ config:
   vmess_port: 16900
   vless_tls_port: 16901
   vless_ws_port: 16905
+  vless_flow_port: 16908
   vless_grpc_port: 16907
   vless_reality_port: 16906
 
@@ -38,6 +39,7 @@ ports:
   - 16905     # vless+ws
   - 16906     # vless+reality
   - 16907     # vless+grpc
+  - 16908     # vless+flow (xtls-rprx-vision)
 
 build:
   # xray 二进制必须已安装（macOS: brew install xray 或下载官方 release）
