@@ -1,0 +1,60 @@
+name: xray-core
+description: "xray-core 进程管理 — 与 sing-box 同结构/同端口错开，提供 VLESS/VMess/Trojan/Shadowsocks 测试入站 + Reality"
+
+# 默认端口分配（与 sing-box 插件 +100 错开，避免同时启动时端口冲突）
+# 凭证（UUID/密码/私钥）与 sing-box 插件完全独立，互不影响。
+config:
+  # 端口 — 与 plugins/sing-box/plugin.yaml 端口 +100 错开
+  socks_port: 2180
+  ss_port: 8488
+  trojan_port: 9543
+  vmess_port: 16900
+  vless_tls_port: 16901
+  vless_ws_port: 16905
+  vless_grpc_port: 16907
+  vless_reality_port: 16906
+
+  # 凭证（每个插件独立生成/使用，与 sing-box 完全无关）
+  vless_uuid: "e8b9a5b8-7c8a-4a87-b3f1-2e5d4a7c9b1a"
+  vmess_uuid: "e8b9a5b8-7c8a-4a87-b3f1-2e5d4a7c9b1a"
+  trojan_password: "xray-trojan-password"
+  ss_psk: "xP9kL2mN4qR8sT6vW1yB3dF5gH7jM0aC"
+
+  # Reality 凭证（与 sing-box Reality 不兼容，必须独立）
+  # 私钥通过 `xray x25519` 生成；公钥保留供客户端出站配置参考
+  reality_private_key: "YG2cUEJNf-tdCVG1L6VgsUUHwIPMR1swgeMgFnZoGXM"
+  reality_dest: "127.0.0.1:9443"
+  reality_server_names: "localhost,127.0.0.1"
+
+# 插件监听的端口列表 — 用于 zigtester 跨插件端口冲突检测
+# 与 sing-box 插件端口 +100 错开（详见 plugin.yaml 中 config 字段）
+ports:
+  - 9190      # xray readiness 探针端口
+  - 2180      # socks
+  - 8488      # shadowsocks
+  - 9543      # trojan
+  - 16900     # vmess
+  - 16901     # vless+tls
+  - 16905     # vless+ws
+  - 16906     # vless+reality
+  - 16907     # vless+grpc
+
+build:
+  # xray 二进制必须已安装（macOS: brew install xray 或下载官方 release）
+  # 此命令用作存在性检查；失败时 zigtester 标记插件不可用
+  command: "xray version"
+
+lifecycle:
+  start:
+    # 调用 xray_ctl.py 生成最终配置并启动 xray，阻塞直到收到停止信号
+    command: "python3 xray_ctl.py serve --server-config configs/test_server.json"
+    timeout: 15
+    ready_on:
+      type: tcp
+      # xray_ctl.py 启动后会在此端口启动一个轻量 readiness 探测服务
+      port: 9190
+      host: "127.0.0.1"
+  stop:
+    timeout: 10
+    kill:
+      - "xray"

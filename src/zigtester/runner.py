@@ -6,6 +6,7 @@ import os
 import shlex
 import signal
 import subprocess
+import sys
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -13,6 +14,7 @@ from typing import Any
 
 from .config import (
     LevelConfig,
+    PluginRef,
     ProjectConfig,
     ProjectResult,
     ResourceSnapshot,
@@ -497,11 +499,15 @@ def run_project(
                 build_plugin,
                 start_plugin,
                 stop_plugin,
+                check_port_conflicts,
                 _find_zigtester_root,
+                PluginConfig,
             )
             zt_root = _find_zigtester_root()
             if zt_root is not None:
                 available = discover_plugins(zt_root)
+                # 第一遍：解析所有插件配置（不启动），用于端口冲突预检
+                all_parsed: list[tuple[PluginRef, PluginConfig]] = []
                 for plugin_ref in cfg.plugins:
                     if plugin_ref.name not in available:
                         continue
@@ -511,6 +517,28 @@ def run_project(
                     # 合并项目级插件配置覆盖
                     if plugin_ref.config:
                         pcfg.config.update(plugin_ref.config)
+                    all_parsed.append((plugin_ref, pcfg))
+
+                # 端口冲突预检（跨插件 + 系统占用）
+                try:
+                    from .plugin import check_port_conflicts
+                    pcfgs = [pcfg for _, pcfg in all_parsed]
+                    conflicts = check_port_conflicts(pcfgs)
+                    if conflicts:
+                        print(
+                            f"[run] plugin port conflicts detected ({len(conflicts)}):",
+                            file=sys.stderr,
+                        )
+                        for msg in conflicts:
+                            print(f"[run]   - {msg}", file=sys.stderr)
+                        # 冲突时不启动任何插件，避免半启动状态
+                        return result
+                except Exception as e:
+                    # 端口检测异常不应阻止测试（best-effort）
+                    print(f"[run] port conflict check error: {e}", file=sys.stderr)
+
+                # 第二遍：实际启动插件
+                for _, pcfg in all_parsed:
                     build_plugin(pcfg)
                     proc = start_plugin(pcfg, pcfg.path)
                     if proc is not None:

@@ -1,0 +1,200 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "port": __SOCKS_PORT__,
+      "protocol": "socks",
+      "settings": {
+        "udp": false
+      }
+    },
+    {
+      "tag": "ss-in",
+      "listen": "127.0.0.1",
+      "port": __SS_PORT__,
+      "protocol": "shadowsocks",
+      "settings": {
+        "method": "2022-blake3-aes-128-gcm",
+        "password": "__SS_PSK__"
+      }
+    },
+    {
+      "tag": "trojan-in",
+      "listen": "127.0.0.1",
+      "port": __TROJAN_PORT__,
+      "protocol": "trojan",
+      "settings": {
+        "clients": [
+          {
+            "password": "__TROJAN_PASSWORD__"
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "certs/localhost.crt",
+              "keyFile": "certs/localhost.key"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tag": "vmess-in",
+      "listen": "127.0.0.1",
+      "port": __VMESS_PORT__,
+      "protocol": "vmess",
+      "settings": {
+        "clients": [
+          {
+            "id": "__VMESS_UUID__",
+            "alterId": 0
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "ws",
+        "wsSettings": {
+          "path": "/vmess"
+        }
+      }
+    },
+    {
+      "tag": "vless-tls-in",
+      "listen": "127.0.0.1",
+      "port": __VLESS_TLS_PORT__,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "__VLESS_UUID__",
+            "flow": ""
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "certs/localhost.crt",
+              "keyFile": "certs/localhost.key"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tag": "vless-ws-in",
+      "listen": "127.0.0.1",
+      "port": __VLESS_WS_PORT__,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "__VLESS_UUID__",
+            "flow": ""
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "tls",
+        "wsSettings": {
+          "path": "/vless-ws"
+        },
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "certs/localhost.crt",
+              "keyFile": "certs/localhost.key"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tag": "vless-grpc-in",
+      "listen": "127.0.0.1",
+      "port": __VLESS_GRPC_PORT__,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "__VLESS_UUID__",
+            "flow": ""
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "grpc",
+        "security": "tls",
+        "grpcSettings": {
+          "serviceName": "vless-grpc"
+        },
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "certs/localhost.crt",
+              "keyFile": "certs/localhost.key"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tag": "vless-reality-in",
+      "listen": "127.0.0.1",
+      "port": __VLESS_REALITY_PORT__,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "__VLESS_UUID__",
+            "flow": "xtls-rprx-vision"
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "dest": "127.0.0.1:9443",
+          "xver": 0,
+          "serverNames": [
+            "localhost",
+            "127.0.0.1"
+          ],
+          "privateKey": "__REALITY_PRIVATE_KEY__",
+          "shortIds": [
+            ""
+          ]
+        }
+      }
+    }
+  ],
+
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom",
+      "settings": {
+        "domainStrategy": "AsIs"
+      }
+    }
+  ]
+}

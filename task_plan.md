@@ -10,7 +10,7 @@
 
 ## Current Phase
 
-Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅ | Phase 4 ✅ | Phase 5 ✅ | Phase 6 ✅ | Phase 7 ✅
+Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅ | Phase 4 ✅ | Phase 5 ✅ | Phase 6 ✅ | Phase 7 ✅ | Phase 8 🔄
 
 ## Phases
 
@@ -145,6 +145,62 @@ Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅ | Phase 4 ✅ | Phase 5 ✅ | Phase 6 �
 #### P7.5: zigoutbounds 测试脚本迁移（后续）
 - [ ] 更新 `zigoutbounds/zigtester.yaml` 引用 sing-box 插件
 - [ ] 测试脚本迁移到 `SingboxController`（渐进，不破坏现有测试）
+
+### Phase 8: xray-core 插件 + 跨参考实现互测 🔄
+> **创建**: 2026-08-10
+> **背景**: sing-box 插件（Phase 7）验证了"统一测试参考实现 + 插件热插拔"模型可行。xray-core 是 sing-box 之外的另一主流参考实现，两个参考实现的协议握手细节不完全兼容（特别是 VLESS Reality）。同时启用两个参考实现，可对 zigoutbounds 客户端做**跨参考实现互测**，证明 zigoutbounds 协议实现与两个主流实现都兼容。
+> **设计原则**: xray-core 插件与 sing-box 插件**完全独立**——结构同构（plugin.yaml + 控制脚本 + 配置模板）、端口 +100 错开、凭证（UUID/密码/Reality 私钥）独立。即便两个插件同时启动也不冲突。
+
+#### P8.1: xray-core 插件本体 ✅
+- [x] `plugins/xray-core/plugin.yaml` — 镜像 sing-box 插件结构（config/build/lifecycle/ports）
+- [x] `plugins/xray-core/configs/test_server.json` — 8 个协议入站模板：
+  - socks（2180）/ shadowsocks（8488）/ trojan（9543）
+  - vmess-WS（16900）/ vless+tls（16901）/ vless+ws（16905）
+  - **vless+reality（16906）/ vless+grpc（16907）** — xray 特有，预留入站（zigoutbounds 客户端未实现 Reality/grpc，本阶段不接入测试）
+- [x] `plugins/xray-core/xray_ctl.py` — 镜像 singbox_ctl.py：
+  - `XrayController` 类（start/stop/is_running）
+  - 模板渲染（`__KEY__` 占位符 → `PLUGIN_*` env）
+  - **证书路径绝对化**（避免 xray 进程 cwd 不同导致找不到证书）
+  - **启动前端口冲突检测**（与框架级检测互补）
+  - **轻量 readiness 服务**（`:9190` 裸 TCP）— xray 不暴露 REST API，需自建探针
+  - CLI: `serve` / `render` 子命令
+- [x] `plugins/xray-core/certs/` — 复用 sing-box 的 localhost 测试证书
+- [x] 验证：8 个入站端口全部 LISTEN（Xray 26.3.27 实测）
+
+#### P8.2: 跨插件端口冲突检测 ✅
+- [x] `PluginConfig.ports` 字段 + `parse_plugin_config()` 解析 `ports:` 段
+- [x] `check_port_conflicts()` — 检测两类冲突：
+  - 跨插件重复端口（不同插件声明同一端口）
+  - 系统已占用端口（残留进程）
+- [x] `runner.py` — 启动插件前两遍扫描预检，冲突时**阻止所有插件启动**（避免半启动状态）
+- [x] `plugins/sing-box/plugin.yaml` + `plugins/xray-core/plugin.yaml` — 显式声明 `ports:` 字段
+- [x] 端口错开约定：xray-core = sing-box + 100（便于人工记忆）
+
+#### P8.3: zigoutbounds 接入（规划中）
+- [ ] `zigoutbounds/tests/lib/xray.py` — 镜像 `lib/singbox.py` 接口
+- [ ] `test_protocols.py` — `SingboxProcess.start()` 加 xray 复用分支（与 singbox 并列互斥）
+- [ ] `benchmark.py` — 同上
+- [ ] `zigoutbounds/zigtester.yaml` — `plugins:` 加 `- xray-core`，新增 functional/performance 套件
+  - functional: `xray-ss2022` / `xray-trojan` / `xray-vless-tls` / `xray-vless-ws`
+  - functional: `cross-{proto}` — `test_protocols.py {proto} --cross-impl`
+  - performance: `bench-xray-ss2022` / `bench-xray-trojan` / `bench-xray-vless`
+- [ ] 范围决策：**跳过 VMess** / **跳过 Reality+grpc**（zigoutbounds 未实现客户端）
+- [ ] 范围决策：**不加 test_all_protocols.py 的 xray 路径**（保持单插件职责清晰）
+
+#### 关键发现
+- **xray-core 无 REST API**：与 sing-box 内置 Clash API 不同，xray 进程不暴露运行时 API。需要插件自建轻量 readiness 服务（裸 TCP）供 zigtester ready_on 探针使用
+- **Reality 协议不兼容**：xray Reality 用 x25519 私钥格式，sing-box Reality 私钥格式不同 → 必须各自独立凭证（不能用同一组 UUID/私钥）
+- **证书路径**：xray 进程的 cwd 不一定是插件目录（macOS brew 安装在 /usr/local/bin），配置中 cert/key 必须用绝对路径
+- **进程 cwd 风险**：`subprocess.Popen` 的 cwd 是 `plugin.path`（插件目录），但 xray 二进制如果是 PATH 中的，OS 解析路径后用 `/usr/local/bin` 作为 cwd。**配置路径绝对化是必须**
+
+#### 决策记录
+| Decision | Rationale |
+|----------|-----------|
+| xray 端口与 sing-box +100 错开 | 简单可预测，便于人工记忆；同一项目同时启用两个插件不冲突 |
+| VLESS Reality 用独立私钥 | xray 与 sing-box Reality 私钥格式不兼容，无法共用 |
+| 跳过 VMess + Reality/grpc 测试接入 | zigoutbounds 客户端未实现 Reality/grpc（仅 config 层定义），E2E 无意义 |
+| 不在 test_all_protocols.py 加 xray 路径 | 单插件职责清晰；cross-impl 通过独立 `--cross-impl` flag 实现 |
+| readiness 探针用裸 TCP 而非 HTTP | xray 不暴露 REST API，自建 HTTP 服务需要 30+ 行代码；裸 TCP accept 即可判定进程存活 |
 
 ## Key Questions
 

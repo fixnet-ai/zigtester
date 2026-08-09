@@ -312,6 +312,54 @@ TUN 功能测试从 zigbox 迁移到 zigtun（TUN 组件库），实现关注点
 - 旧：`{"type":"stdio","command":"python3","args":["-m","zigtester.server"],"env":{...}}`
 - 新：`{"type":"http","url":"http://127.0.0.1:9020/mcp"}`
 
+## xray-core 集成发现（2026-08-10）
+
+### xray 进程 cwd 与证书相对路径冲突
+
+**现象**：渲染后的 xray 配置中 `certificates[0].certificateFile = "certs/localhost.crt"`（相对路径），启动 xray 时报：
+```
+Failed to start: main: failed to load config files > Failed to build TLS config > 
+failed to parse certificate > open /usr/local/bin/certs/localhost.crt: no such file or directory
+```
+
+**根因**：macOS brew 安装的 `/usr/local/bin/xray` 二进制被 OS 解析为绝对路径后，`subprocess.Popen(cwd=plugin.path)` 设置的 cwd 是插件目录，但 xray 进程**内部**仍以二进制所在目录（`/usr/local/bin`）为基准解析相对路径。这是 POSIX 进程行为的细微差异——`execve()` 不会改变 cwd，取决于父进程的设置。
+
+**解决方案**：在 `xray_ctl.py` 的 `_render_config_to_path()` 中渲染后立即扫描所有 inbound 的 `streamSettings.tlsSettings.certificates[*].certificateFile / keyFile`，将相对路径转为绝对路径（基于插件目录）。同一份渲染逻辑适用于 `plugin.yaml` 中声明的任何路径字段。
+
+**教训**：跨语言/跨进程调用时，**配置中所有路径必须绝对化**。即便父进程 cwd 正确，子进程（特别是被 OS 重定向到不同目录的二进制）可能按不同基准解析。
+
+### xray 无 REST API — 自建 readiness 探针
+
+**现象**：与 sing-box 内置 Clash API（`GET /version`、`PUT /configs`）不同，xray-core 进程**不暴露任何运行时 API**。无法用 HTTP 健康检查判定 xray 是否就绪。
+
+**根因**：xray-core 的设计哲学是"轻量代理核心"——所有管理功能（API/统计）都由用户态协议层提供（如 Xray API、gRPC 控制），非核心功能。这意味着 `xray run -c config.json` 启动后只有 listen 端口可观测。
+
+**解决方案**：在 `xray_ctl.py` 中启动独立线程跑轻量 TCP server（端口 9190）—— `socket.bind()` + `listen()` + `accept()` 循环。任何 TCP 连接即关闭都视为"xray 进程存活 + 探针线程存活"。zigtester `ready_on.type: tcp` 探针与原 sing-box 插件 1:1 对应。
+
+**教训**：插件 readiness 探针应选**最便宜的存活信号**——裸 TCP 优于 HTTP（前者少 50+ 行代码、少一次解析、少一层失败模式）。仅当需要传递额外信息（如版本号）时才用 HTTP。
+
+### 跨插件端口冲突的两层防御
+
+**现象**：两个插件同时声明同一端口（例如 sing-box 和 xray-core 都用 9090），会出现 bind: address already in use，启动失败但混乱（哪个先启动？哪个失败？怎么提示？）
+
+**解决方案**：两层防御——
+1. **YAML 错开约定**（人工层）：约定 xray 端口 = sing-box + 100，便于人工记忆
+2. **框架级冲突检测**（自动层）：`check_port_conflicts(plugins)` 在 `run_project()` 启动插件前对所有启用插件做静态检测，发现冲突直接拒绝启动（避免半启动状态）
+
+**关键设计**：冲突检测**阻塞所有插件启动**——而不是只跳过冲突的插件。如果只有 sing-box 启动而 xray 不启动，会让项目处于"部分参考实现就绪"的不一致状态，测试结果不可信。
+
+**教训**：多资源协作系统（多插件同时启动）的故障必须**整体回滚**，不能让部分先跑部分后跑。失败原语应该是原子的——要么全成功要么全失败。
+
+### Reality 协议跨实现不兼容
+
+**现象**：sing-box 的 Reality 与 xray-core 的 Reality 在私钥格式、握手协议、uTLS 指纹协商上有差异。共享同一组 UUID + privateKey 无法让两个服务端同时接受同一个客户端的连接。
+
+**根因**：Reality 是 v2ray-core (xray 前身) 发明的协议，sing-box 复刻时为了跨平台做了格式调整。xray 26.x 的 Reality 私钥用 x25519 标准格式，sing-box 1.11+ 用 base64 编码但长度/前缀不同。两个实现**不能互通同一组凭证**。
+
+**解决方案**：每个插件使用**完全独立**的 UUID/密码/Reality 私钥。客户端连接哪个实现就用对应的凭证。zigtester 插件层面保证两套凭证不冲突（命名空间隔离：`PLUGIN_VLESS_UUID` vs singbox 配置段）。
+
+**教训**：跨语言/跨实现复刻协议时，**永远不要假设凭证可移植**。即便是同一协议族（VLESS/Reality/VMess），不同实现的"细节差异"足以让一份凭证作废。每个实现保留独立凭证，命名上明确前缀（`SB_VLESS_UUID` / `XRAY_VLESS_UUID`），避免后续维护者混淆。
+
 ## Visual/Browser Findings
 
 -

@@ -46,6 +46,7 @@ class PluginConfig:
     build: PluginBuild = field(default_factory=PluginBuild)
     lifecycle: PluginLifecycle | None = None
     config: dict[str, Any] = field(default_factory=dict)  # 项目级覆盖配置
+    ports: list[int] = field(default_factory=list)        # 插件监听端口（用于跨插件冲突检测）
 
 
 # ── 解析 ────────────────────────────────────────────────────
@@ -73,6 +74,13 @@ def parse_plugin_config(plugin_dir: str) -> PluginConfig | None:
     else:
         config = {}
 
+    # 端口列表（可选）— 用于跨插件端口冲突检测
+    ports_raw = raw.get("ports", [])
+    if isinstance(ports_raw, list):
+        ports = [int(p) for p in ports_raw if isinstance(p, (int, float))]
+    else:
+        ports = []
+
     # build
     build_raw = raw.get("build", {})
     build = PluginBuild(
@@ -90,6 +98,7 @@ def parse_plugin_config(plugin_dir: str) -> PluginConfig | None:
             build=build,
             config=config,
             lifecycle=None,
+            ports=ports,
         )
 
     start_raw = lc_raw.get("start", {})
@@ -115,6 +124,7 @@ def parse_plugin_config(plugin_dir: str) -> PluginConfig | None:
         build=build,
         config=config,
         lifecycle=lifecycle,
+        ports=ports,
     )
 
 
@@ -303,3 +313,60 @@ def _kill_plugin_process(
             proc.wait(timeout=2)
     except Exception:
         pass
+
+
+# ── 端口冲突检测 ──────────────────────────────────────────────
+
+
+def _port_listening(host: str, port: int, timeout: float = 0.3) -> bool:
+    """检测 TCP 端口是否正在被监听。"""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        try:
+            s.connect((host, port))
+        except OSError:
+            return False
+        finally:
+            s.close()
+        return True
+    except Exception:
+        return False
+
+
+def check_port_conflicts(
+    plugins: list[PluginConfig],
+    host: str = "127.0.0.1",
+) -> list[str]:
+    """检查一组插件声明的端口是否与已监听端口冲突。
+
+    两种冲突类型：
+      1. 跨插件冲突 — 不同插件声明了相同端口（YAML 配置错误）
+      2. 系统冲突 — 插件声明的端口已被系统中其他进程占用（残留进程）
+
+    返回冲突描述列表（空列表 = 无冲突）。
+    """
+    conflicts: list[str] = []
+
+    # 1) 跨插件重复端口检测
+    port_to_plugin: dict[int, list[str]] = {}
+    for plugin in plugins:
+        for port in plugin.ports:
+            port_to_plugin.setdefault(port, []).append(plugin.name)
+
+    for port, names in sorted(port_to_plugin.items()):
+        if len(names) > 1:
+            conflicts.append(
+                f"port {port} 被多个插件同时声明: {', '.join(names)}"
+            )
+
+    # 2) 系统已占用端口检测
+    for plugin in plugins:
+        for port in plugin.ports:
+            if _port_listening(host, port):
+                conflicts.append(
+                    f"插件 {plugin.name} 声明的端口 {host}:{port} 已被占用（可能是其他 zigtester 插件残留）"
+                )
+
+    return conflicts

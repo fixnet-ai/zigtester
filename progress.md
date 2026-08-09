@@ -1,5 +1,43 @@
 # Progress Log
 
+## Session: 2026-08-10
+
+### xray-core 插件 + 跨参考实现互测 🔄
+- **Status:** Phase 8.1 + 8.2 完成；8.3 (zigoutbounds 接入) 规划完成，待执行
+- Actions taken:
+  - `plugins/xray-core/plugin.yaml` — 镜像 sing-box 插件结构（config/build/lifecycle/ports）
+  - `plugins/xray-core/xray_ctl.py` — 镜像 singbox_ctl.py：
+    - 模板渲染（`__KEY__` 占位符 + `PLUGIN_*` env 注入）
+    - 证书路径绝对化（避免 xray 进程 cwd 错位找不到证书）
+    - 启动前端口冲突检测（与框架级互补）
+    - 轻量 readiness 服务（:9190 裸 TCP）— xray 不暴露 REST API
+    - CLI `serve` / `render` 子命令
+  - `plugins/xray-core/configs/test_server.json` — 8 个协议入站（socks/ss/trojan/vmess-ws/vless-tls/vless-ws/vless-reality/vless-grpc），含 Reality + grpc 预留入站
+  - `plugins/xray-core/certs/` — 复用 sing-box localhost 测试证书
+  - `plugins/sing-box/plugin.yaml` + `plugins/xray-core/plugin.yaml` — 加 `ports:` 字段启用冲突检测
+  - `src/zigtester/plugin.py` — `PluginConfig.ports` 字段 + `check_port_conflicts()` 函数（跨插件 + 系统占用两类）
+  - `src/zigtester/runner.py` — 启动插件前两遍扫描做端口预检，冲突时阻止所有插件启动
+- 验证（2026-08-10 01:01）：
+  - 模板渲染：12 个占位符全部正确替换
+  - 证书路径：自动转为绝对路径 `/Users/.../certs/localhost.crt`
+  - xray 启动：Xray 26.3.27 成功，8 个入站端口全部 LISTEN
+  - 冲突检测：清洁状态 0 冲突；模拟冲突（端口 9090 同时声明）正确检出
+
+#### 关键技术决策
+1. **xray 端口与 sing-box +100 错开**：约定 `socks 2180 / ss 8488 / trojan 9543 / vmess 16900 / vless 16901 / vless-ws 16905 / vless-reality 16906 / vless-grpc 16907`
+2. **xray Reality 凭证独立**：与 sing-box Reality 协议不完全兼容，UUID/私钥各自独立
+3. **证书路径绝对化**：xray 二进制 `/usr/local/bin/xray` 启动后 cwd 在该目录，`certs/localhost.crt` 相对路径解析失败 → 必须在 `xray_ctl.py` 渲染时转为绝对路径
+4. **readiness 探针用裸 TCP**：xray 无 REST API，自建 HTTP 服务复杂；裸 TCP accept 即证明进程存活
+5. **跳过 VMess + Reality/grpc 接入测试**：zigoutbounds 客户端未实现 Reality/grpc，E2E 无意义
+6. **冲突检测前置**：框架级在所有插件启动前检测，冲突则不启动任何插件（避免半启动状态）
+
+#### 范围决策（与用户确认）
+- 接入协议：SS2022 / Trojan / VLESS-tls / VLESS-ws（4 个，跳过 VMess）
+- 套件类型：xray-* 单插件套件 + cross-* 双插件对比套件
+- 脚本：复用现有 test_protocols.py / benchmark.py（加 xray 复用分支 + `--cross-impl` flag）
+- 层级：functional + performance 都加
+- Reality/grpc：作为 xray 入站保留，**不接入**测试
+
 ## Session: 2026-08-08
 
 ### MCP Server stdio → HTTP transport 迁移 ✅

@@ -18,6 +18,22 @@ config:
   tuic_port: 16803
   hysteria2_salamander_port: 16804
 
+# 插件监听的端口列表 — 用于 zigtester 跨插件端口冲突检测
+# 与 xray-core 插件的同名端口 +100 错开
+ports:
+  - 9090      # sing-box Clash API
+  - 2080      # mixed
+  - 5354      # dns (UDP)
+  - 8388      # shadowsocks
+  - 9443      # trojan
+  - 10443     # hysteria2
+  - 16800     # vmess
+  - 16801     # vless
+  - 16802     # hysteria2 alt
+  - 16803     # tuic
+  - 16804     # hysteria2 salamander
+  - 16805     # vless-ws
+
 build:
   command: "sing-box version"
 
