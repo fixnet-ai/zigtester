@@ -40,7 +40,7 @@
 //   :16802 hysteria2   — Hysteria2 (QUIC) 副端口
 //   :16803 tuic        — TUIC v5 (QUIC)
 //   :16804 hysteria2   — Hysteria2 + Salamander 混淆
-//   (16805 reserved for gecko obfs — requires sing-box 1.14+)
+//   :16805 vless+ws    — VLESS (TLS+WebSocket)
 
 {
   "log": {
@@ -197,6 +197,28 @@
       "obfs": {
         "type": "salamander",
         "password": "salamander-password"
+      }
+    },
+    {
+      "type": "vless",
+      "tag": "vless-ws-in",
+      "listen": "::",
+      "listen_port": 16805,
+      "users": [
+        {
+          "name": "test-user",
+          "uuid": "387b71a7-15ce-4ee0-a791-ab5a08aaa9dc",
+          "flow": ""
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "certs/localhost.crt",
+        "key_path": "certs/localhost.key"
+      },
+      "transport": {
+        "type": "ws",
+        "path": "/vless-ws"
       }
     }
   ],

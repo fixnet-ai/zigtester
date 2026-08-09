@@ -230,7 +230,7 @@ zigoutbounds 有 **3 个独立的 SingboxProcess 实现**，大量重复代码�
 - 共享端口：mixed(2080), ss(8388), trojan(9443), vmess(16800), vless(16801), tuic(16803) — 6 个
 - singbox_test.json 独有：hysteria2(10443), dns-direct(5354) — 2 个
 - singbox_all_inbounds.json 独有：socks(2081), http(2082), hysteria2-alt(16802) — 3 个
-- experiment-hysteria2 独有：hysteria2-salamander(16804) — 1 个
+- experiment-hysteria2（已删除）：hysteria2-salamander(16804) — 1 个
 - 合计 12 inbound，0 端口冲突
 	- **后续简化 (2026-08-07)**：移除 socks(2081) 和 http(2082) — mixed:2080 已同时支持 SOCKS5+HTTP 代理。统一配置现为 10 inbound 双栈（`"listen": "::"`）。
 
@@ -246,7 +246,7 @@ Hysteria2 和 TUIC 基于 QUIC 协议，使用 UDP 传输。端口检测时必�
 
 - **zigbox**：测试直接连 echo server，不经过 sing-box。只有 zigoutbounds 用 sing-box。
 - **zigtun**：无 sing-box 依赖。
-- **experiment-hysteria2**：手动测试脚本使用 sing-box，但无自动化测试。
+- **experiment-hysteria2（已删除）**：手动测试脚本使用 sing-box，但无自动化测试。
 
 ### TUN 测试迁移：zigtun vs zigbox 职责分离（2026-08-07）
 

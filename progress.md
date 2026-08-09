@@ -38,8 +38,8 @@
 - Actions taken:
   - zigbox/tests/test_bench.py — 删除死代码 `_kill_on_port()`（从未调用，避免未来误杀插件进程）
   - zigoutbounds/tests/tools/scaffold_protocol.py — 更新代码生成模板，生成的命令模板现在包含插件检测
-  - zigoutbounds/experiment-hysteria2/test/e2e_salamander.sh — 添加 `PLUGIN_SINGBOX_RUNNING` 检测，插件运行时跳过 sing-box 启动和端口清理
-  - experiment-hysteria2/test/e2e/run_e2e_test.py — 添加 `is_plugin_singbox_running()`，插件运行时复用统一配置端口
+  - experiment-hysteria2/test/e2e_salamander.sh（已删除）— 添加插件运行时检测
+  - experiment-hysteria2/test/e2e/run_e2e_test.py（已删除）— 添加插件运行时检测
 - Verification: 插件 sing-box 运行时，所有脚本不再冲突或杀死插件进程
 
 ### Task 2: TUN 测试迁移到 zigtun ✅
