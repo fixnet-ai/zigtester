@@ -14,7 +14,7 @@ Maintaining multiple independent projects means each one tends to grow its own t
 - **Wraps existing tests, doesn't replace them** — works with what you already have (`zig build test`, Python scripts, shell commands)
 - **Resource monitoring by default** — CPU, memory, and file descriptors tracked on every run, no per-project instrumentation needed
 - **Performance regressions don't go unnoticed** — every run is automatically compared against historical baselines, anomalies flagged on sight
-- **AI-native integration** — MCP Server lets Claude Code execute tests, analyze results, and flag regressions in real time
+- **AI-native integration** — MCP Server lets your AI coding agent execute tests, analyze results, and flag regressions in real time
 
 ## AI Agent-Driven Daily Testing
 
@@ -27,7 +27,7 @@ Having AI read raw test output is expensive: it burns tokens, misparses formats,
 ```
 You: I just changed the SS2022 cipher in zigoutbounds. Run the relevant tests.
 
-Claude Code via MCP:
+AI agent via MCP:
   → zigtester_list zigoutbounds          # what suites are available?
   → zigtester_run zigoutbounds --suite e2e-ss2022  # auto-includes dependency crypto-ss2022
   → Returns: 2/2 passed, 0.8s, peak memory 34 MB
@@ -41,7 +41,7 @@ What you see:
 ```
 You: About to open a PR. Run unit tests for every project — make sure I didn't break anything.
 
-Claude Code via MCP:
+AI agent via MCP:
   → zigtester_run --all --level unit
   → 6 projects in parallel, 5 seconds total
   → Structured summary returned (not hundreds of lines of raw zig build test output per project)
@@ -56,7 +56,7 @@ What you see:
 ```
 You: Did this change affect zigbox throughput?
 
-Claude Code via MCP:
+AI agent via MCP:
   → zigtester_history zigbox bench-throughput
   → Loads last 10 runs, compares against baseline automatically
 
@@ -71,7 +71,7 @@ What you see:
 ```
 You: GitHub Actions shows zigoutbounds functional is red. Figure out what's going on.
 
-Claude Code via MCP:
+AI agent via MCP:
   → zigtester_run zigoutbounds --level functional
   → Finds e2e-vless-udp failed, exit code 1
   → Checks history: this suite was PASS yesterday, resource usage unchanged
@@ -86,7 +86,7 @@ What you see:
 ```
 You: I moved zigoutbounds from ~/old-path/ to ~/new-path/. Is its history gone?
 
-Claude Code via MCP:
+AI agent via MCP:
   → zigtester run detects UUID match, history carries over seamlessly
 
 What you see:
@@ -174,7 +174,7 @@ levels:
 # Start (long-running daemon; port binding prevents duplicate instances)
 ZIGTESTER_ROOT=~/projects python -m zigtester.server &
 
-# Claude Code config (~/.claude.json, mcpServers section):
+# MCP client config (~/.claude.json or other MCP client, mcpServers section):
 {
   "zigtester": {
     "type": "http",
@@ -183,7 +183,7 @@ ZIGTESTER_ROOT=~/projects python -m zigtester.server &
 }
 ```
 
-The MCP Server exposes 5 tools: `zigtester_scan`, `zigtester_list`, `zigtester_run`, `zigtester_history`, `zigtester_init`. Claude Code calls them automatically — you just describe what you want in natural language.
+The MCP Server exposes 5 tools: `zigtester_scan`, `zigtester_list`, `zigtester_run`, `zigtester_history`, `zigtester_init`. Your AI coding agent calls them automatically — you just describe what you want in natural language.
 
 ### Why MCP instead of letting AI read raw output
 
