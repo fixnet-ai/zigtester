@@ -2,13 +2,13 @@
 
 <img src="WHATIAM.png" alt="zigtester" width="100%">
 
-**One config file. All your tests. Measured 60%–85% token reduction for AI agent testing, with dramatically improved tool-use accuracy and efficiency.** zigtester is the unified test framework for the fixnet ecosystem — delivering a consistent testing experience across 6+ independent projects. It's a CLI tool. It's also an AI agent's test execution engine.
+**One config file. All your tests. Measured 60%–85% token reduction for AI agent testing, with dramatically improved tool-use accuracy and efficiency.** zigtester is a language-agnostic unified test framework — drop a `zigtester.yaml` into any project and get consistent discovery, execution, reporting, and historical regression tracking. It's a CLI tool. It's also an AI agent's test execution engine.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 ## Why zigtester
 
-The fixnet ecosystem spans multiple independent projects, each with its own test tools, output formats, and run conventions. Switching between projects means remembering different commands, parsing different output, and manually comparing historical data — that's not how testing should feel.
+Maintaining multiple independent projects means each one tends to grow its own test tools, output formats, and run conventions. Switching between projects means remembering different commands, parsing different output, and manually comparing historical data — that's not how testing should feel.
 
 - **One config, zero fragmentation** — drop a `zigtester.yaml` in any project and the framework takes care of discovery, execution, and reporting
 - **Wraps existing tests, doesn't replace them** — works with what you already have (`zig build test`, Python scripts, shell commands)
@@ -172,7 +172,7 @@ levels:
 
 ```bash
 # Start (long-running daemon; port binding prevents duplicate instances)
-ZIGTESTER_ROOT=~/works/2025/fixnet python -m zigtester.server &
+ZIGTESTER_ROOT=~/projects python -m zigtester.server &
 
 # Claude Code config (~/.claude.json, mcpServers section):
 {
