@@ -1,5 +1,7 @@
 # zigtester
 
+<img src="WHATIAM.png" alt="zigtester" width="600">
+
 **One config file. All your tests. Measured 60%–85% token reduction for AI agent testing, with dramatically improved tool-use accuracy and efficiency.** zigtester is the unified test framework for the fixnet ecosystem — delivering a consistent testing experience across 6+ independent projects. It's a CLI tool. It's also an AI agent's test execution engine.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
