@@ -390,6 +390,30 @@ class DnsEchoProtocol(asyncio.DatagramProtocol):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Raw UDP Echo — 原样回传 UDP 数据报 (透明代理 UDP 测试用)
+# ═══════════════════════════════════════════════════════════════
+
+class RawUdpEchoProtocol(asyncio.DatagramProtocol):
+    """Raw UDP echo: 收到什么就回传什么, 不做任何解析。"""
+
+    def __init__(self) -> None:
+        self.transport: asyncio.DatagramTransport | None = None
+
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
+        self.transport = transport  # type: ignore[assignment]
+
+    def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
+        if self.transport:
+            self.transport.sendto(data, addr)
+
+    def error_received(self, exc: Exception) -> None:
+        logger.debug(f"[udp-echo] UDP error: {exc}")
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        pass
+
+
+# ═══════════════════════════════════════════════════════════════
 # 服务器启动与管理
 # ═══════════════════════════════════════════════════════════════
 
@@ -405,18 +429,23 @@ class EchoServer:
         tcp_host: str = "::",
         tcp_port: int = 13333,
         dns_port: int = 5353,
+        udp_echo_port: int = 13334,
         upstream_dns: str = "8.8.8.8",
         no_dns: bool = False,
+        no_udp_echo: bool = False,
     ) -> None:
         self.tcp_host = tcp_host
         self.tcp_port = tcp_port
         self.dns_port = dns_port
+        self.udp_echo_port = udp_echo_port
         self.upstream_dns = upstream_dns
         self.no_dns = no_dns
+        self.no_udp_echo = no_udp_echo
 
         self._tcp_servers: list[asyncio.AbstractServer] = []
         self._dns_transport: asyncio.DatagramTransport | None = None
         self._dns_protocol: DnsEchoProtocol | None = None
+        self._udp_echo_transport: asyncio.DatagramTransport | None = None
         self._shutdown_event = asyncio.Event()
         self._started_at: float = 0.0
 
@@ -464,6 +493,26 @@ class EchoServer:
                     f"unavailable (try sudo): {e}"
                 )
 
+        # Raw UDP echo — 绑定 127.0.0.1 原样回传
+        if not self.no_udp_echo:
+            try:
+                udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                udp_sock.bind(("127.0.0.1", self.udp_echo_port))
+                transport, _ = await loop.create_datagram_endpoint(
+                    lambda: RawUdpEchoProtocol(),
+                    sock=udp_sock,
+                )
+                self._udp_echo_transport = transport
+                logger.info(
+                    f"[udp-echo] raw udp echo listening: 127.0.0.1:{self.udp_echo_port}"
+                )
+            except OSError as e:
+                logger.warning(
+                    f"[udp-echo] UDP echo skipped — port {self.udp_echo_port} "
+                    f"unavailable: {e}"
+                )
+
         logger.info("[echo] ready")
 
     # ── 关闭 ──────────────────────────────────────────────────
@@ -480,6 +529,10 @@ class EchoServer:
         # 关闭 DNS transport
         if self._dns_transport:
             self._dns_transport.close()
+
+        # 关闭 UDP echo transport
+        if self._udp_echo_transport:
+            self._udp_echo_transport.close()
 
         self._shutdown_event.set()
         elapsed = time.monotonic() - self._started_at
@@ -543,6 +596,14 @@ def main() -> None:
         help="禁用 DNS echo，仅启动 TCP echo"
     )
     parser.add_argument(
+        "--udp-echo-port", type=int, default=13334,
+        help="Raw UDP echo 监听端口 (默认: 13334)"
+    )
+    parser.add_argument(
+        "--no-udp-echo", action="store_true",
+        help="禁用 raw UDP echo"
+    )
+    parser.add_argument(
         "--quiet", action="store_true",
         help="减少日志输出（WARNING 级别）"
     )
@@ -554,8 +615,10 @@ def main() -> None:
         tcp_host=args.tcp_host,
         tcp_port=args.tcp_port,
         dns_port=args.dns_port,
+        udp_echo_port=args.udp_echo_port,
         upstream_dns=args.upstream_dns,
         no_dns=args.no_dns,
+        no_udp_echo=args.no_udp_echo,
     )
 
     try:
