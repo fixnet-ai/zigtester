@@ -156,6 +156,34 @@
       }
     },
     {
+      "tag": "trojan-grpc-in",
+      "listen": "127.0.0.1",
+      "port": __TROJAN_GRPC_PORT__,
+      "protocol": "trojan",
+      "settings": {
+        "clients": [
+          {
+            "password": "__TROJAN_PASSWORD__"
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "grpc",
+        "security": "tls",
+        "grpcSettings": {
+          "serviceName": "trojan-grpc"
+        },
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "certs/localhost.crt",
+              "keyFile": "certs/localhost.key"
+            }
+          ]
+        }
+      }
+    },
+    {
       "tag": "vless-flow-in",
       "listen": "127.0.0.1",
       "port": __VLESS_FLOW_PORT__,
