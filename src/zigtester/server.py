@@ -160,7 +160,9 @@ def zigtester_run(
     # 保存历史
     try:
         from .history import save_run
-        save_run(pr)
+        from .config import ensure_project_id
+        pid = ensure_project_id(p.config_path, p.config)
+        save_run(pr, pid, p.path)
     except Exception:
         pass
 

@@ -119,6 +119,7 @@ class PluginRef:
 class ProjectConfig:
     """项目完整配置。"""
     project: str
+    project_id: str | None = None     # UUID v4，项目稳定身份（不随目录移动变化）
     description: str = ""
     settings: ProjectSettings = field(default_factory=ProjectSettings)
     levels: dict[str, LevelConfig] = field(default_factory=dict)
@@ -278,6 +279,7 @@ def parse_config(path: str) -> ProjectConfig:
         raise ValueError(f"配置文件为空: {path}")
 
     project = str(raw["project"])
+    project_id = str(raw["id"]) if "id" in raw else None
     description = str(raw.get("description", ""))
     settings = _parse_settings(raw.get("settings"))
 
@@ -305,6 +307,7 @@ def parse_config(path: str) -> ProjectConfig:
 
     return ProjectConfig(
         project=project,
+        project_id=project_id,
         description=description,
         settings=settings,
         levels=levels,
@@ -390,9 +393,18 @@ def validate_config(raw: dict) -> list[str]:
 
 # ── 模板生成 ──────────────────────────────────────────────
 
+import uuid as _uuid
+
+
+def _new_project_id() -> str:
+    """生成新的 UUID v4 项目标识。"""
+    return str(_uuid.uuid4())
+
+
 _TEMPLATE = """# zigtester 测试配置 — 自动生成
-# 项目标识
+# 项目标识（勿手动修改 id）
 project: {project_name}
+id: {project_id}
 description: ""
 
 # 全局设置
@@ -447,4 +459,44 @@ levels:
 
 def generate_template(project_name: str) -> str:
     """为项目生成初始 zigtester.yaml 内容。"""
-    return _TEMPLATE.format(project_name=project_name)
+    return _TEMPLATE.format(
+        project_name=project_name,
+        project_id=_new_project_id(),
+    )
+
+
+def ensure_project_id(config_path: str, config: ProjectConfig) -> str:
+    """确保项目有 UUID 标识。
+
+    若已有 id 则直接返回；否则生成新 UUID 并写回 zigtester.yaml
+    （保留文件原有结构和注释，仅在 `project:` 行后追加一行 `id:`）。
+
+    Returns:
+        项目的稳定 UUID（已有或新生成的）
+    """
+    if config.project_id is not None:
+        return config.project_id
+
+    new_id = _new_project_id()
+    config.project_id = new_id
+
+    # 读原文件，在 project: 行后插入 id: 行
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        inserted = False
+        new_lines: list[str] = []
+        for line in lines:
+            new_lines.append(line)
+            if not inserted and line.startswith("project:"):
+                new_lines.append(f"id: {new_id}\n")
+                inserted = True
+
+        if inserted:
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+    except OSError:
+        pass  # 写回失败不阻塞测试
+
+    return new_id

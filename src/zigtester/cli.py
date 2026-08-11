@@ -102,7 +102,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         # 保存历史
         try:
             from .history import save_run
-            save_run(pr)
+            from .config import ensure_project_id
+            pid = ensure_project_id(target_projects[0].config_path, target_projects[0].config)
+            save_run(pr, pid, target_projects[0].path)
         except Exception:
             pass
 
@@ -134,10 +136,17 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(f"  报告已保存: {args.json_output}")
 
         # 保存历史
-        for pr in ws.projects:
+        try:
+            from .history import save_run
+            from .config import ensure_project_id
+        except Exception:
+            pass
+        for i, pr in enumerate(ws.projects):
             try:
-                from .history import save_run
-                save_run(pr)
+                proj = target_projects[i] if i < len(target_projects) else None
+                pid = ensure_project_id(proj.config_path, proj.config) if proj else pr.project
+                path = proj.path if proj else ""
+                save_run(pr, pid, path)
             except Exception:
                 pass
 
