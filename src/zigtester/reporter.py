@@ -47,6 +47,30 @@ _STATUS_ICONS = {
 }
 
 
+def _fmt_resource(rp: "ResourceSnapshot") -> str:
+    """格式化资源快照为紧凑单行字符串。
+
+    sample_count=0 时返回 "n/a"（psutil 未安装或采样失败），
+    与真零使用区分开。
+    """
+    if rp.sample_count == 0:
+        return "n/a"
+    parts = [f"mem:{rp.peak_memory_mb:.0f}MB"]
+    if rp.peak_fd_count > 0:
+        parts.append(f"fd:{rp.peak_fd_count}")
+    if rp.peak_cpu_pct > 0:
+        parts.append(f"cpu:{rp.peak_cpu_pct:.0f}%")
+    return " ".join(parts)
+
+
+def _project_of(ws: "WorkspaceResult", suite_result: "SuiteResult") -> str:
+    """根据 SuiteResult 反向查找所属项目名。"""
+    for pr in ws.projects:
+        if suite_result in pr.suites:
+            return pr.project
+    return "?"
+
+
 class Reporter:
     """测试报告输出器。"""
 
@@ -179,6 +203,18 @@ class Reporter:
             print(f"  通过: {total_pass}{_GREEN} ✓{_RESET}  "
                   f"失败: {total_fail}{_RED} ✗{_RESET}  "
                   f"错误: {total_error}{_MAGENTA} ⚠{_RESET}")
+            # 工作区资源汇总
+            all_suites = [s for pr in ws.projects for s in pr.suites
+                         if s.resource_peak.sample_count > 0]
+            if all_suites:
+                mem = max(all_suites, key=lambda s: s.resource_peak.peak_memory_mb)
+                fd = max(all_suites, key=lambda s: s.resource_peak.peak_fd_count)
+                print(
+                    f"  {_DIM}资源峰值: mem={mem.resource_peak.peak_memory_mb:.0f}MB "
+                    f"({mem.suite_name}@{_project_of(ws, mem)}) | "
+                    f"fd={fd.resource_peak.peak_fd_count} "
+                    f"({fd.suite_name}@{_project_of(ws, fd)}){_RESET}"
+                )
             print(f"{_BOLD}{'='*60}{_RESET}")
 
     # ── 终端格式 ───────────────────────────────────────────
@@ -211,6 +247,9 @@ class Reporter:
                     continue
                 self._print_suite_terminal(s)
 
+        # 项目级资源汇总
+        self._print_resource_summary(result.suites)
+
         print(f"{_BOLD}{'-'*60}{_RESET}")
         summary = (
             f"  总计 {len(result.suites)} | "
@@ -237,7 +276,12 @@ class Reporter:
         level_tag = f"[{suite.level}] " if suite.level else ""
         msg = f" — {suite.message}" if suite.message else ""
 
-        line = f"  {color}{icon}{_RESET} {level_tag}{suite.suite_name}{duration}{msg}"
+        # 非 verbose：套件行末尾追加资源摘要
+        res_str = _fmt_resource(suite.resource_peak)
+        if res_str != "n/a":
+            line = f"  {color}{icon}{_RESET} {level_tag}{suite.suite_name}{duration}{msg}  {_DIM}{res_str}{_RESET}"
+        else:
+            line = f"  {color}{icon}{_RESET} {level_tag}{suite.suite_name}{duration}{msg}"
         print(line)
 
         # 详细模式显示指标
@@ -245,19 +289,51 @@ class Reporter:
             for k, v in suite.metrics.items():
                 print(f"      {_DIM}{k}={v}{_RESET}")
 
-        # 详细模式显示资源
+        # 详细模式显示完整资源（峰值 + 均值）
         if self.verbose and suite.resource_peak.sample_count > 0:
             rp = suite.resource_peak
             print(f"      {_DIM}mem: peak={rp.peak_memory_mb}MB "
                   f"avg={rp.avg_memory_mb}MB | "
-                  f"fd: peak={rp.peak_fd_count} | "
-                  f"cpu: peak={rp.peak_cpu_pct}%{_RESET}")
+                  f"fd: peak={rp.peak_fd_count} avg={rp.avg_fd_count:.0f} | "
+                  f"cpu: peak={rp.peak_cpu_pct}% avg={rp.avg_cpu_pct}%{_RESET}")
+        elif self.verbose and suite.resource_peak.sample_count == 0:
+            print(f"      {_DIM}res: n/a{_RESET}")
 
         # 显示 setup/teardown 错误（始终显示，非 verbose 也展示关键信息）
         if suite.setup_error:
             print(f"      {_YELLOW}⚠ setup: {suite.setup_error}{_RESET}")
         if suite.teardown_error:
             print(f"      {_YELLOW}⚠ teardown: {suite.teardown_error}{_RESET}")
+
+    @staticmethod
+    def _print_resource_summary(suites: list["SuiteResult"]) -> None:
+        """打印项目级资源汇总：peak memory + 对应套件，总 fd 峰值。
+
+        仅当至少有一个套件包含有效采样数据时才输出。
+        """
+        sampled = [s for s in suites if s.resource_peak.sample_count > 0]
+        if not sampled:
+            return
+
+        peak_mem = max(sampled, key=lambda s: s.resource_peak.peak_memory_mb, default=None)
+        peak_fd = max(sampled, key=lambda s: s.resource_peak.peak_fd_count, default=None)
+        peak_cpu = max(sampled, key=lambda s: s.resource_peak.peak_cpu_pct, default=None)
+        total_fd = max(s.resource_peak.peak_fd_count for s in sampled)
+
+        parts = []
+        if peak_mem:
+            parts.append(
+                f"mem: {peak_mem.resource_peak.peak_memory_mb:.0f}MB ({peak_mem.suite_name})"
+            )
+        if total_fd > 0:
+            parts.append(f"fd: {total_fd} peak")
+        if peak_cpu and peak_cpu.resource_peak.peak_cpu_pct > 0:
+            parts.append(
+                f"cpu: {peak_cpu.resource_peak.peak_cpu_pct:.0f}% ({peak_cpu.suite_name})"
+            )
+
+        if parts:
+            print(f"  {_DIM}资源: {' | '.join(parts)}{_RESET}")
 
     # ── Markdown 格式 ──────────────────────────────────────
 
@@ -295,15 +371,16 @@ class Reporter:
         lines.append("")
 
         lines.append("### 套件明细")
-        lines.append("| 状态 | 层级 | 套件 | 耗时 | 说明 |")
-        lines.append("|------|------|------|------|------|")
+        lines.append("| 状态 | 层级 | 套件 | 耗时 | 资源 | 说明 |")
+        lines.append("|------|------|------|------|------|------|")
         for s in result.suites:
             icon = {"PASS": "✅", "FAIL": "❌", "SKIP": "○", "ERROR": "⚠"}.get(
                 s.status, "?"
             )
             duration = f"{s.duration_ms:.0f}ms" if s.duration_ms > 0 else "-"
             msg = s.message.replace("|", "\\|") if s.message else "-"
-            lines.append(f"| {icon} | {s.level} | {s.suite_name} | {duration} | {msg} |")
+            res_col = _fmt_resource(s.resource_peak)
+            lines.append(f"| {icon} | {s.level} | {s.suite_name} | {duration} | {res_col} | {msg} |")
         lines.append("")
 
         if all_ok and pass_n > 0:
@@ -387,8 +464,8 @@ class Reporter:
             f"> {now} CST | 总耗时 {elapsed:.1f}s | "
             f"通过 {pass_n} | 失败 {fail_n} | 错误 {err_n} | 跳过 {skip_n}",
             "",
-            "| 层级 | 套件 | 状态 | 耗时 | 关键指标 |",
-            "|------|------|------|------|----------|",
+            "| 层级 | 套件 | 状态 | 耗时 | 资源 | 关键指标 |",
+            "|------|------|------|------|------|----------|",
         ]
 
         for s in result.suites:
@@ -407,6 +484,9 @@ class Reporter:
             # 关键指标：优先用 message，fallback 到退出码
             key = s.message.strip() if s.message else f"exit={s.exit_code}"
 
+            # 资源列
+            res_col = _fmt_resource(s.resource_peak)
+
             # 拼接 setup/teardown 警告
             notes = ""
             if s.setup_error:
@@ -415,10 +495,21 @@ class Reporter:
                 notes += f" ⚠teardown"
 
             lines.append(
-                f"| {s.level} | {s.suite_name} | {emoji} {s.status} | {dur_str} | {key}{notes} |"
+                f"| {s.level} | {s.suite_name} | {emoji} {s.status} | {dur_str} | {res_col} | {key}{notes} |"
             )
 
         lines.append("")
+
+        # 项目级资源汇总
+        sampled = [s for s in result.suites if s.resource_peak.sample_count > 0]
+        if sampled:
+            peak_mem = max(sampled, key=lambda s: s.resource_peak.peak_memory_mb)
+            peak_fd = max(sampled, key=lambda s: s.resource_peak.peak_fd_count)
+            total_fd = max(s.resource_peak.peak_fd_count for s in sampled)
+            lines.append(f"> 资源峰值: mem={peak_mem.resource_peak.peak_memory_mb:.0f}MB "
+                        f"({peak_mem.suite_name}) "
+                        f"fd={total_fd} ({peak_fd.suite_name})")
+            lines.append("")
 
         # 汇总行
         total = len(result.suites)

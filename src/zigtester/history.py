@@ -102,6 +102,7 @@ def check_regression(
     current: dict[str, float],
     history: list[dict],
     threshold_pct: float = 20.0,
+    current_resource: dict[str, float] | None = None,
 ) -> list[Regression]:
     """检查当前指标相对于历史基线是否退化。
 
@@ -109,12 +110,14 @@ def check_regression(
     若某指标 > threshold_pct 的退化，标记为 REGRESSION。
 
     Args:
-        current: 当前指标字典 {metric_name: value}
+        current: 当前性能指标字典 {metric_name: value}
         history: load_history() 返回的历史记录（最新在前）
         threshold_pct: 退化百分比阈值（默认 20%）
+        current_resource: 当前资源指标 {peak_memory_mb, peak_fd, peak_cpu_pct}
+                          （可选，传入后一并检测资源回归）
 
     Returns:
-        Regression 列表
+        Regression 列表（仅 is_regression=True 的条目）
     """
     if not history:
         return []
@@ -124,8 +127,7 @@ def check_regression(
     # 取最近 5 次（或全部）作为基线
     baseline_window = history[:5]
 
-    # 从历史记录中提取指标
-    # 所有记录的指标汇总
+    # ── 性能指标回归 ──
     all_metric_names: set[str] = set()
     for r in baseline_window:
         metrics = r.get("metrics", {})
@@ -137,7 +139,6 @@ def check_regression(
         if cur_val is None:
             continue
 
-        # 收集基线值
         baseline_values: list[float] = []
         for r in baseline_window:
             m = r.get("metrics", {})
@@ -155,21 +156,82 @@ def check_regression(
             continue
 
         pct_change = ((cur_val - baseline_avg) / abs(baseline_avg)) * 100
+        is_regression = _is_metric_regression(metric_name, pct_change, threshold_pct)
 
-        # 吞吐类指标：越低越差；延迟类指标：越高越差
-        # 这里用 pct_change 的绝对值判断（双向退化检测）
-        is_regression = abs(pct_change) > threshold_pct and pct_change < 0
+        if is_regression:
+            regressions.append(Regression(
+                metric=metric_name,
+                current=round(cur_val, 2),
+                baseline_avg=round(baseline_avg, 2),
+                pct_change=round(pct_change, 1),
+                is_regression=True,
+            ))
 
-        # 对于延迟/错误类指标，升高也是退化
-        if "latency" in metric_name or "error" in metric_name or "failed" in metric_name:
-            is_regression = abs(pct_change) > threshold_pct and pct_change > 0
+    # ── 资源指标回归 ──
+    # history 存储格式：{peak_memory_mb, peak_fd, peak_cpu_pct}
+    # 资源指标方向：升高 = 退化（更多内存、更多 FD、更高 CPU）
+    if current_resource:
+        for hist_key in ("peak_memory_mb", "peak_fd", "peak_cpu_pct"):
+            cur_val = current_resource.get(hist_key)
+            if cur_val is None or cur_val == 0:
+                continue
 
-        regressions.append(Regression(
-            metric=metric_name,
-            current=round(cur_val, 2),
-            baseline_avg=round(baseline_avg, 2),
-            pct_change=round(pct_change, 1),
-            is_regression=is_regression,
-        ))
+            baseline_values: list[float] = []
+            for r in baseline_window:
+                res = r.get("resource", {})
+                if isinstance(res, dict) and hist_key in res:
+                    try:
+                        val = float(res[hist_key])
+                        if val > 0:
+                            baseline_values.append(val)
+                    except (ValueError, TypeError):
+                        pass
+
+            if len(baseline_values) < 2:
+                continue
+
+            baseline_avg = sum(baseline_values) / len(baseline_values)
+            if baseline_avg == 0:
+                continue
+
+            pct_change = ((cur_val - baseline_avg) / baseline_avg) * 100
+            is_regression = pct_change > threshold_pct
+
+            if is_regression:
+                # 用户可读的指标名
+                display_name = {
+                    "peak_memory_mb": "peak_memory_mb",
+                    "peak_fd": "peak_fd_count",
+                    "peak_cpu_pct": "peak_cpu_pct",
+                }.get(hist_key, hist_key)
+                regressions.append(Regression(
+                    metric=display_name,
+                    current=round(cur_val, 2),
+                    baseline_avg=round(baseline_avg, 2),
+                    pct_change=round(pct_change, 1),
+                    is_regression=True,
+                ))
 
     return [r for r in regressions if r.is_regression]
+
+
+def _is_metric_regression(
+    metric_name: str, pct_change: float, threshold_pct: float,
+) -> bool:
+    """判断性能指标是否构成退化。
+
+    吞吐类（throughput/reqs/rate）：下降 = 退化
+    延迟/错误类（latency/error/failed/duration）：升高 = 退化
+    其他：双向检测
+    """
+    if abs(pct_change) <= threshold_pct:
+        return False
+
+    if any(kw in metric_name for kw in ("latency", "error", "failed", "duration")):
+        return pct_change > 0
+
+    if any(kw in metric_name for kw in ("throughput", "reqs", "rate", "passed", "total")):
+        return pct_change < 0
+
+    # 默认双向检测
+    return True

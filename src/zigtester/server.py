@@ -233,8 +233,9 @@ def zigtester_history(
 
     records = load_history(project, suite, n=limit)
     current_metrics = records[0].get("metrics", {}) if records else {}
+    current_resource = records[0].get("resource", {}) if records else {}
 
-    regressions = check_regression(current_metrics, records)
+    regressions = check_regression(current_metrics, records, current_resource=current_resource)
 
     # 精简历史（只保留时间戳和指标）
     runs_out = []

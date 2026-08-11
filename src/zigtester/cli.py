@@ -155,8 +155,9 @@ def cmd_history(args: argparse.Namespace) -> int:
 
     # 当前指标（最新一条）
     current_metrics = records[0].get("metrics", {}) if records else {}
+    current_resource = records[0].get("resource", {}) if records else {}
 
-    regressions = check_regression(current_metrics, records)
+    regressions = check_regression(current_metrics, records, current_resource=current_resource)
 
     reporter = Reporter(format=args.report_format)
     reporter.print_history(args.project, args.suite, records, regressions)
