@@ -171,10 +171,10 @@ levels:
 ## MCP Server Deployment
 
 ```bash
-# Start (long-running daemon; port binding prevents duplicate instances)
+# Start (long-running daemon; stateless JSON-RPC, no SSE/session overhead)
 ZIGTESTER_ROOT=~/projects python -m zigtester.server &
 
-# MCP client config (~/.claude.json or other MCP client, mcpServers section):
+# Any MCP client config (Claude Code, VS Code, etc.):
 {
   "zigtester": {
     "type": "http",
@@ -209,7 +209,8 @@ One result, three formats, each for a different audience:
 
 - **Python 3.10+**, PyYAML + FastMCP
 - **SQLite** single-file history store (WAL mode), auto-migrates from legacy JSON
-- **HTTP transport** MCP Server — port binding provides natural mutual exclusion
+- **Stateless JSON-RPC over HTTP** — no SSE, no sessions; works with any MCP client
+- **Port binding** ensures at most one server instance — no zombie processes
 - **UUID project identity** — move directories without losing history
 - Subprocess isolation with timeout control, graceful signal termination, and residue cleanup
 - 5 built-in output parsers, extensible via custom regex patterns
