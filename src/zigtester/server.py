@@ -327,7 +327,7 @@ def main():
     print(f"[zigtester] MCP Server 启动: http://{host}:{port}  (PID {pid})", file=sys.stderr)
 
     try:
-        mcp.run(transport="http", host=host, port=port)
+        mcp.run(transport="http", host=host, port=port, stateless_http=True, json_response=True)
     finally:
         _cleanup_pid()
         print(f"[zigtester] MCP Server 已停止 (PID {pid})", file=sys.stderr)
