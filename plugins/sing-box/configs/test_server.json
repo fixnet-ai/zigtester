@@ -41,6 +41,9 @@
 //   :16803 tuic        — TUIC v5 (QUIC)
 //   :16804 hysteria2   — Hysteria2 + Salamander 混淆
 //   :16805 vless+ws    — VLESS (TLS+WebSocket)
+//   :16806 trojan+ws   — Trojan (TLS+WebSocket)
+//   :16807 vless+grpc  — VLESS (TLS+gRPC)
+//   :16808 trojan+grpc — Trojan (TLS+gRPC)
 
 {
   "log": {
@@ -219,6 +222,70 @@
       "transport": {
         "type": "ws",
         "path": "/vless-ws"
+      }
+    },
+    {
+      "type": "trojan",
+      "tag": "trojan-ws-in",
+      "listen": "::",
+      "listen_port": 16806,
+      "users": [
+        {
+          "name": "test-user",
+          "password": "test-password"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "certs/localhost.crt",
+        "key_path": "certs/localhost.key"
+      },
+      "transport": {
+        "type": "ws",
+        "path": "/trojan-ws"
+      }
+    },
+    {
+      "type": "vless",
+      "tag": "vless-grpc-in",
+      "listen": "::",
+      "listen_port": 16807,
+      "users": [
+        {
+          "name": "test-user",
+          "uuid": "387b71a7-15ce-4ee0-a791-ab5a08aaa9dc",
+          "flow": ""
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "certs/localhost.crt",
+        "key_path": "certs/localhost.key"
+      },
+      "transport": {
+        "type": "grpc",
+        "service_name": "vless-grpc"
+      }
+    },
+    {
+      "type": "trojan",
+      "tag": "trojan-grpc-in",
+      "listen": "::",
+      "listen_port": 16808,
+      "users": [
+        {
+          "name": "test-user",
+          "password": "test-password"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "certs/localhost.crt",
+        "key_path": "certs/localhost.key"
+      },
+      "transport": {
+        "type": "grpc",
+        "service_name": "trojan-grpc"
       }
     }
   ],
