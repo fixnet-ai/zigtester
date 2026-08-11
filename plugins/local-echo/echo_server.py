@@ -493,19 +493,19 @@ class EchoServer:
                     f"unavailable (try sudo): {e}"
                 )
 
-        # Raw UDP echo — 绑定 127.0.0.1 原样回传
+        # Raw UDP echo — 绑定 0.0.0.0 原样回传 (全平台可访问)
         if not self.no_udp_echo:
             try:
                 udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                udp_sock.bind(("127.0.0.1", self.udp_echo_port))
+                udp_sock.bind(("0.0.0.0", self.udp_echo_port))
                 transport, _ = await loop.create_datagram_endpoint(
                     lambda: RawUdpEchoProtocol(),
                     sock=udp_sock,
                 )
                 self._udp_echo_transport = transport
                 logger.info(
-                    f"[udp-echo] raw udp echo listening: 127.0.0.1:{self.udp_echo_port}"
+                    f"[udp-echo] raw udp echo listening: 0.0.0.0:{self.udp_echo_port}"
                 )
             except OSError as e:
                 logger.warning(
