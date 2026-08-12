@@ -493,25 +493,25 @@ class EchoServer:
                     f"unavailable (try sudo): {e}"
                 )
 
-        # Raw UDP echo — 绑定 0.0.0.0 原样回传 (全平台可访问)
+        # Raw UDP echo — 双栈监听（IPv4 + IPv6），全平台可访问
         if not self.no_udp_echo:
-            try:
-                udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                udp_sock.bind(("0.0.0.0", self.udp_echo_port))
-                transport, _ = await loop.create_datagram_endpoint(
-                    lambda: RawUdpEchoProtocol(),
-                    sock=udp_sock,
-                )
-                self._udp_echo_transport = transport
-                logger.info(
-                    f"[udp-echo] raw udp echo listening: 0.0.0.0:{self.udp_echo_port}"
-                )
-            except OSError as e:
-                logger.warning(
-                    f"[udp-echo] UDP echo skipped — port {self.udp_echo_port} "
-                    f"unavailable: {e}"
-                )
+            for host, family in (("0.0.0.0", socket.AF_INET), ("::", socket.AF_INET6)):
+                try:
+                    udp_sock = socket.socket(family, socket.SOCK_DGRAM)
+                    udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    udp_sock.bind((host, self.udp_echo_port))
+                    transport, _ = await loop.create_datagram_endpoint(
+                        lambda: RawUdpEchoProtocol(),
+                        sock=udp_sock,
+                    )
+                    self._udp_echo_transport = transport
+                    logger.info(
+                        f"[udp-echo] raw udp echo listening: {host}:{self.udp_echo_port}"
+                    )
+                except OSError as e:
+                    logger.debug(
+                        f"[udp-echo] udp echo bind skipped {host}:{self.udp_echo_port}: {e}"
+                    )
 
         logger.info("[echo] ready")
 
