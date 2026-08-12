@@ -1,10 +1,10 @@
 name: local-echo
-description: "TCP echo + DNS echo for proxy chain testing — 替代 zigbox --local-echo"
+description: "TCP echo :13333 + UDP echo :13334 — 协议测试回环目标，无需 sudo"
 build:
   command: "true"
 lifecycle:
   start:
-    command: "sudo python3 echo_server.py --tcp-port 13333 --dns-port 53"
+    command: "python3 echo_server.py --tcp-port 13333 --udp-echo-port 13334 --no-dns"
     timeout: 10
     ready_on:
       type: tcp
