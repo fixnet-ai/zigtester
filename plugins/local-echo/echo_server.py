@@ -198,6 +198,10 @@ class EchoProtocol(asyncio.Protocol):
 
     状态机:
       detect → socks5_echo | connect_echo | http_close
+
+    HTTP 分支设计精华:【请求原文原封不动作为 HTTP response body 回写】——
+    首包即请求,响应含 Content-Length 头(HTTP 完整语义,客户端可准确接收
+    body 长度),回写后优雅关闭。
     """
 
     def __init__(self) -> None:
@@ -233,7 +237,7 @@ class EchoProtocol(asyncio.Protocol):
         优先级:
           1. 0x05 → SOCKS5 握手 → 响应 0x05 0x00，进入 echo 模式
           2. CONNECT 前缀 → HTTP CONNECT 隧道 → 200 Connection Established
-          3. 其他 → HTTP 请求 → 200 OK + 请求原文 body
+          3. 其他 → HTTP 请求 → 200 OK + Content-Length + 请求原文 body
         """
         if data and data[0] == 0x05:
             # SOCKS5 无认证握手
@@ -250,12 +254,13 @@ class EchoProtocol(asyncio.Protocol):
                 )
             logger.debug(f"[tcp] CONNECT detected: peer={self._peer}")
         else:
-            # HTTP 请求 — 返回 200 OK + 请求原文 body，然后优雅关闭
+            # HTTP 请求 — 返回 200 OK + Content-Length + 请求原文 body，然后优雅关闭
             self._state = "http_close"
             header = (
                 b"HTTP/1.1 200 OK\r\n"
                 b"Content-Type: text/plain\r\n"
-                b"Connection: close\r\n"
+                + f"Content-Length: {len(data)}\r\n".encode()
+                + b"Connection: close\r\n"
                 b"\r\n"
             )
             if self.transport:
