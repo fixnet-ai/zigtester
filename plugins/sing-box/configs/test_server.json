@@ -177,6 +177,7 @@
       ],
       "tls": {
         "enabled": true,
+        "alpn": ["h3"],
         "certificate_path": "certs/localhost.crt",
         "key_path": "certs/localhost.key"
       }
