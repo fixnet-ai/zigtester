@@ -48,6 +48,11 @@ import (
 
 var httpMethods = []string{"GET ", "POST ", "HEAD ", "PUT ", "DELETE ", "OPTIONS ", "PATCH "}
 
+// 缓冲池(2026-08-17):短连接高并发下复用 64K 读缓冲与 bufio.Reader,
+// 减少每连接分配与 GC 压力(800 连 = 51MB 分配 → 池化后 ~0)。
+var chunkPool = sync.Pool{New: func() any { return make([]byte, 65536) }}
+var readerPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, 65536) }}
+
 const httpOkHeaderTpl = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nConnection: close\r\n\r\n"
 
 // ═══════════════════════════════════════════════════════════════
@@ -56,9 +61,12 @@ const httpOkHeaderTpl = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-
 
 func handleTcp(conn net.Conn) {
 	defer conn.Close()
-	r := bufio.NewReaderSize(conn, 65536)
+	r := readerPool.Get().(*bufio.Reader)
+	r.Reset(conn)
+	defer readerPool.Put(r)
 	// 单次读首包(非 Peek——客户端可能发完即等响应,ReadAll/Peek(7) 会死锁)
-	buf := make([]byte, 65536)
+	buf := chunkPool.Get().([]byte)
+	defer chunkPool.Put(buf)
 	n, err := r.Read(buf)
 	if err != nil || n == 0 {
 		return
@@ -87,8 +95,9 @@ func handleTcp(conn net.Conn) {
 // 超时/EOF 停止并清 deadline(后续 io.Copy 正常)。
 func mergeWithin(conn net.Conn, r *bufio.Reader, data []byte, window time.Duration) []byte {
 	conn.SetReadDeadline(time.Now().Add(window))
+	chunk := chunkPool.Get().([]byte)
+	defer chunkPool.Put(chunk)
 	for len(data) < 65536 {
-		chunk := make([]byte, 65536)
 		n, err := r.Read(chunk)
 		if n > 0 {
 			data = append(data, chunk[:n]...)
@@ -136,8 +145,9 @@ func handleSocks5(conn net.Conn, r *bufio.Reader, data []byte) {
 	// 补读 helper:buf 不足 required 时从 reader 续读
 	needMore := func(buf []byte, required int) ([]byte, bool) {
 		for len(buf) < required {
-			chunk := make([]byte, 65536)
+			chunk := chunkPool.Get().([]byte)
 			n, err := r.Read(chunk)
+			chunkPool.Put(chunk)
 			if err != nil || n == 0 {
 				return buf, false
 			}
@@ -207,8 +217,9 @@ func echoMode(conn net.Conn, r *bufio.Reader, first []byte, closeAfterEcho bool)
 	// 首段数据可能还在 reader(粘包耗尽):读一段再探测
 	// (事件驱动语义的同步等价:goroutine 阻塞等待客户端首段,不占其他连接)
 	if len(first) == 0 {
-		chunk := make([]byte, 65536)
+		chunk := chunkPool.Get().([]byte)
 		n, err := r.Read(chunk)
+		chunkPool.Put(chunk)
 		if err != nil || n == 0 {
 			return
 		}
