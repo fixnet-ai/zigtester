@@ -1,10 +1,10 @@
 name: local-echo
-description: "TCP+UDP echo :13333 + h2 echo :13335 + h3 echo :13336 + DNS echo :5533 — 协议测试回环目标"
+description: "统一 Go echo 服务(2026-08-17 重做):TCP+UDP :13333 + h2 :13335 + h3 :13336 + DNS :5533 — 单程序高性能"
 build:
-  command: "cd h2h3 && go build -o ../h2h3-echo ."
+  command: "go build -o local-echo ."
 lifecycle:
   start:
-    command: "python3 echo_server.py --tcp-port 13333 --udp-echo-port 13333 --dns-port 5533 & exec ./h2h3-echo --h2-port 13335 --h3-port 13336 --cert certs/localhost.crt --key certs/localhost.key"
+    command: "exec ./local-echo --tcp-port 13333 --dns-port 5533 --h2-port 13335 --h3-port 13336 --cert certs/localhost.crt --key certs/localhost.key"
     timeout: 10
     ready_on:
       type: tcp
@@ -13,5 +13,4 @@ lifecycle:
   stop:
     timeout: 5
     kill:
-      - "echo_server"
-      - "h2h3-echo"
+      - "local-echo"

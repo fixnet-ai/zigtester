@@ -38,3 +38,4 @@ Desktop.ini
 # Playwright MCP temp files
 .playwright-mcp/
 h2h3-echo
+plugins/local-echo/local-echo
