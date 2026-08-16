@@ -291,6 +291,13 @@
     }
   ],
 
+  "dns": {
+    "servers": [
+      {"type": "udp", "tag": "real-dns", "server": "127.0.0.1", "server_port": 15353}
+    ],
+    "final": "real-dns"
+  },
+
   "outbounds": [
     {
       "type": "direct",

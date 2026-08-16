@@ -1,10 +1,10 @@
 name: local-echo
-description: "统一 Go echo 服务(2026-08-17 重做):TCP+UDP :13333 + h2 :13335 + h3 :13336 + DNS :5533 — 单程序高性能"
+description: "统一 Go echo 服务(2026-08-17 重做):TCP+UDP :13333 + bench :13337(短连接 10ms idle) + stream :13338(长连接无 idle) + h2 :13335 + h3 :13336 + DNS :5533(FakeIP)/:15353(real-map) + HTTP :18080 + TLS :18443 — 单程序高性能"
 build:
   command: "go build -o local-echo ."
 lifecycle:
   start:
-    command: "exec ./local-echo --tcp-port 13333 --dns-port 5533 --h2-port 13335 --h3-port 13336 --cert certs/localhost.crt --key certs/localhost.key"
+    command: "exec ./local-echo --tcp-port 13333 --dns-port 5533 --h2-port 13335 --h3-port 13336 --http-port 18080 --tls-port 18443 --real-dns-port 15353 --bench-port 13337 --stream-port 13338 --cert certs/localhost.crt --key certs/localhost.key"
     timeout: 10
     ready_on:
       type: tcp

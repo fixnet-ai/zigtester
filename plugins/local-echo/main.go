@@ -273,6 +273,47 @@ func startsWithMethod(s string) bool {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// bench echo — 纯字节 TCP echo（短连接压测专用，合并自 zo tests/tools/bench-echo）
+// ═══════════════════════════════════════════════════════════════
+// 与协议自适应 echo 的区别:零协议检测,收到什么回什么;10ms 空闲主动关
+// (短连接场景死锁解除关键:客户端发完即等响应,若 echo 端不主动关,上游
+// 服务端永远等客户端关流)。
+//
+// ⚠️ 仅服务短连接 bench-tcp(1KB 单块)。长连接 stream 压测(64KB×N 连续
+// 往返)必须用 --stream-port(无 idle close):2026-08-17 实证 N:1 协议
+// (hy2/tuic/grpc)8 并发的块间空隙 = QUIC/H2 连接级轮转(22-44ms)+
+// 冷启动慢启动饥饿(偶发 >500ms),任何 idle 超时都会误杀长连接。
+
+const idleCloseTimeout = 10 * time.Millisecond
+
+func handleBench(conn net.Conn) {
+	defer conn.Close()
+	buf := chunkPool.Get().([]byte)
+	defer chunkPool.Put(buf)
+	for {
+		conn.SetReadDeadline(time.Now().Add(idleCloseTimeout))
+		n, err := conn.Read(buf)
+		if n > 0 {
+			conn.Write(buf[:n])
+			continue
+		}
+		if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			return // 空闲超时:主动关
+		}
+		return // EOF / 错误
+	}
+}
+
+// handleStream — 长连接流式 echo（stream 压测专用）:无 idle 超时,
+// io.Copy 内核 splice(读多少回多少,连接由客户端/对端关闭终结)。
+// 与 2026-08-17 之前的 bench-echo io.Copy 版语义一致(8198dc3 时代
+// stream 21/21 绿的先决条件)。
+func handleStream(conn net.Conn) {
+	defer conn.Close()
+	_, _ = io.Copy(conn, conn)
+}
+
+// ═══════════════════════════════════════════════════════════════
 // UDP echo — 原样回传
 // ═══════════════════════════════════════════════════════════════
 
@@ -293,6 +334,7 @@ func handleUdp(conn *net.UDPConn) {
 // ═══════════════════════════════════════════════════════════════
 
 var testDomains = []string{"echo.direct", "echo.proxy", "echo.block", "baidu.com", "google.com"}
+
 
 func isTestDomain(domain string) bool {
 	for _, d := range testDomains {
@@ -383,7 +425,7 @@ func buildDnsResponse(packet []byte, query *dnsQuery, ips []net.IP) []byte {
 	return resp
 }
 
-func handleDns(conn *net.UDPConn, upstream string) {
+func handleDns(conn *net.UDPConn, upstream string, realMode bool) {
 	buf := make([]byte, 65535)
 	pending := make(map[uint16]*net.UDPAddr)
 	var mu sync.Mutex
@@ -421,7 +463,8 @@ func handleDns(conn *net.UDPConn, upstream string) {
 			}
 			if query.domain == "localhost" || isTestDomain(query.domain) {
 				var ips []net.IP
-				if query.domain == "localhost" {
+				if query.domain == "localhost" || realMode {
+					// real 模式(zigbox 矩阵二级 DNS):测试域名解析真实环回
 					if query.qtype == 1 {
 						ips = []net.IP{net.IPv4(127, 0, 0, 1)}
 					} else {
@@ -471,24 +514,92 @@ func main() {
 	h3Port := flag.Int("h3-port", 13336, "HTTP/3 echo port")
 	certPath := flag.String("cert", "certs/localhost.crt", "TLS certificate")
 	keyPath := flag.String("key", "certs/localhost.key", "TLS key")
+	httpPort := flag.Int("http-port", 0, "extra protocol-adaptive echo port (0=off; zigbox matrix curl target 18080)")
+	tlsPort := flag.Int("tls-port", 0, "extra TLS echo port (0=off; SNI sniff scenario 18443)")
+	realDnsPort := flag.Int("real-dns-port", 0, "secondary DNS port with real-map semantics (0=off; zigbox matrix 15353)")
+	benchPort := flag.Int("bench-port", 0, "short-conn bench echo port, 10ms idle close (0=off; bench-tcp 13337)")
+	streamPort := flag.Int("stream-port", 0, "long-conn stream echo port, no idle close (0=off; bench-stream 13338)")
 	flag.Parse()
 
 	// ---- TCP echo(协议自适应)----
-	tcpLn, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *tcpPort))
-	if err != nil {
-		log.Fatalf("tcp listen: %v", err)
-	}
-	go func() {
+	serveTcpEcho := func(ln net.Listener, name string) {
 		for {
-			conn, err := tcpLn.Accept()
+			conn, err := ln.Accept()
 			if err != nil {
-				log.Printf("[tcp] accept: %v", err)
+				log.Printf("[%s] accept: %v", name, err)
 				return
 			}
 			go handleTcp(conn)
 		}
-	}()
+	}
+	tcpLn, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *tcpPort))
+	if err != nil {
+		log.Fatalf("tcp listen: %v", err)
+	}
+	go serveTcpEcho(tcpLn, "tcp")
 	fmt.Printf("TCP_ECHO=127.0.0.1:%d\n", *tcpPort)
+
+	// ---- 额外 HTTP 回显端口(同协议自适应;zigbox 矩阵 NOTUN curl 目标)----
+	if *httpPort > 0 {
+		httpLn, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", *httpPort))
+		if err != nil {
+			log.Fatalf("http echo listen: %v", err)
+		}
+		go serveTcpEcho(httpLn, "http-echo")
+		fmt.Printf("HTTP_ECHO=0.0.0.0:%d\n", *httpPort)
+	}
+
+	// ---- 额外 TLS 回显端口(SNI 嗅探场景)----
+	if *tlsPort > 0 {
+		tlsCert, err := tls.LoadX509KeyPair(*certPath, *keyPath)
+		if err != nil {
+			log.Fatalf("tls echo load cert: %v", err)
+		}
+		tlsLn, err := tls.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", *tlsPort), &tls.Config{Certificates: []tls.Certificate{tlsCert}})
+		if err != nil {
+			log.Fatalf("tls echo listen: %v", err)
+		}
+		go serveTcpEcho(tlsLn, "tls-echo")
+		fmt.Printf("TLS_ECHO=0.0.0.0:%d\n", *tlsPort)
+	}
+
+	// ---- bench echo(纯字节,短连接压测;零协议检测 + 10ms 空闲主动关)----
+	if *benchPort > 0 {
+		benchLn, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *benchPort))
+		if err != nil {
+			log.Fatalf("bench echo listen: %v", err)
+		}
+		go func() {
+			for {
+				conn, err := benchLn.Accept()
+				if err != nil {
+					log.Printf("[bench-echo] accept: %v", err)
+					return
+				}
+				go handleBench(conn)
+			}
+		}()
+		fmt.Printf("BENCH_ECHO=127.0.0.1:%d\n", *benchPort)
+	}
+
+	// ---- stream echo(纯字节,长连接压测;无 idle close,io.Copy splice)----
+	if *streamPort > 0 {
+		streamLn, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *streamPort))
+		if err != nil {
+			log.Fatalf("stream echo listen: %v", err)
+		}
+		go func() {
+			for {
+				conn, err := streamLn.Accept()
+				if err != nil {
+					log.Printf("[stream-echo] accept: %v", err)
+					return
+				}
+				go handleStream(conn)
+			}
+		}()
+		fmt.Printf("STREAM_ECHO=127.0.0.1:%d\n", *streamPort)
+	}
 
 	// ---- UDP echo(原样回传)----
 	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: *tcpPort})
@@ -498,13 +609,23 @@ func main() {
 	go handleUdp(udpConn)
 	fmt.Printf("UDP_ECHO=127.0.0.1:%d\n", *tcpPort)
 
-	// ---- DNS echo(选择性代理)----
+	// ---- DNS echo(选择性代理;FakeIP 模式)----
 	dnsConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: *dnsPort})
 	if err != nil {
 		log.Fatalf("dns listen: %v", err)
 	}
-	go handleDns(dnsConn, *upstreamDns)
+	go handleDns(dnsConn, *upstreamDns, false)
 	fmt.Printf("DNS_ECHO=127.0.0.1:%d\n", *dnsPort)
+
+	// ---- 二级 DNS(real-map 模式:测试域名 → 127.0.0.1/::1;zigbox 矩阵)----
+	if *realDnsPort > 0 {
+		realDnsConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: *realDnsPort})
+		if err != nil {
+			log.Fatalf("real dns listen: %v", err)
+		}
+		go handleDns(realDnsConn, *upstreamDns, true)
+		fmt.Printf("REAL_DNS_ECHO=127.0.0.1:%d\n", *realDnsPort)
+	}
 
 	// ---- H2 echo ----
 	h2Ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *h2Port))

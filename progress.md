@@ -271,3 +271,14 @@
 - sing-box test_server.json 新增 Hysteria2 配置（端口 10443）
 
 全项目统一版本发布：包含 zigfoundation、zigtun、zigproxy、zigdns、zigoutbounds、zigbox 所有 v0.21.0 同步更新。
+
+## 2026-08-17（续）统一 Go echo 完成 + 生态切换
+
+- **local-echo 单程序承载全部 echo 协议**（替代 python3 echo_server.py + h2h3-echo 两进程，已删除）：
+  - TCP :13333（协议自适应 SOCKS5/CONNECT/HTTP）+ UDP :13333 raw echo + DNS :5533 FakeIP
+  - h2 :13335 / h3 :13336（Go 标准库 + quic-go http3）
+  - HTTP :18080 / TLS :18443（zigbox 矩阵 curl/SNI 目标）
+  - real DNS :15353（real-map 模式，zigbox 矩阵 server B）
+  - bench :13337（短连接压测，10ms idle 主动关——grpc 死锁解除）+ stream :13338（长连接压测，无 idle——N:1 轮转空隙误杀实证，findings zo §28.14）
+- **原则落地：各项目不再直接操作 echo-server**——zigbox/zigproxy/zigdns/zo 的测试脚本由自启动改为 detect-and-error（未运行提示 zigtester run），echo 生命周期统一由插件常驻管理
+- 验证：zo functional+performance 28/28 全绿

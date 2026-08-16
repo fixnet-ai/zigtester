@@ -190,21 +190,36 @@ levels:
 通过 `plugins/<name>/plugin.yaml` 定义可复用的测试依赖（echo server、sing-box 等），含构建命令、启动/停止生命周期、就绪检测：
 
 ```yaml
-# plugins/local-echo/plugin.yaml
+# plugins/local-echo/plugin.yaml（统一 Go 程序，2026-08-17 起替代 Python 版）
 name: local-echo
 build:
-  command: "true"              # 无需构建
+  command: "go build -o local-echo ."
 lifecycle:
   start:
-    command: "python3 echo_server.py --tcp-port 13333"
+    command: "exec ./local-echo --tcp-port 13333 --dns-port 5533 --h2-port 13335
+              --h3-port 13336 --http-port 18080 --tls-port 18443
+              --real-dns-port 15353 --bench-port 13337 --stream-port 13338
+              --cert certs/localhost.crt --key certs/localhost.key"
     timeout: 10
     ready_on:
       type: tcp
       port: 13333
   stop:
     timeout: 5
-    kill: ["echo_server"]
+    kill: ["local-echo"]
 ```
+
+local-echo 端口契约（各项目测试脚本共享，禁止项目脚本自行启停 echo server）：
+
+| 端口 | 协议 | 用途 |
+|------|------|------|
+| 13333 | TCP+UDP | 协议自适应 echo（SOCKS5/CONNECT/HTTP）+ UDP raw echo |
+| 5533 | UDP | DNS echo（FakeIP 模式） |
+| 15353 | UDP | DNS echo（real-map 模式，zigbox 矩阵） |
+| 13335 / 13336 | TCP / UDP | H2 / H3 echo（请求体回显） |
+| 18080 / 18443 | TCP | 额外 HTTP / TLS 回显（zigbox 矩阵 curl 目标） |
+| 13337 | TCP | bench 纯字节 echo（短连接压测，10ms idle 主动关） |
+| 13338 | TCP | stream 纯字节 echo（长连接压测，无 idle——N:1 轮转空隙会误杀长连接） |
 
 ## 设计文档
 
