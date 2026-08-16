@@ -64,7 +64,7 @@ func handleTcp(conn net.Conn) {
 		return
 	}
 	data := buf[:n]
-	data = mergeWithin(conn, r, data, 2*time.Millisecond)
+	data = mergeWithin(conn, r, data, 500*time.Microsecond)
 
 	if data[0] == 0x05 {
 		handleSocks5(conn, r, data)
