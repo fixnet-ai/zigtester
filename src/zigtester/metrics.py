@@ -90,6 +90,16 @@ class MetricExtractor:
             result["tests_total"] = float(total)
             return result
 
+        # 匹配 "202 pass (202 total)" — Zig 0.16 --listen=- 输出格式
+        # （如 "run test zigbox-tests 202 pass (202 total) 56ms MaxRSS:11M"）。
+        # 0.16 的 listen 模式其实有 count 行，此前 fallthrough 到 exit_code
+        # 驱动会误报 1/1（2026-08-18 实测 zig build test 202 测试误记 1）。
+        m = re.search(r"(\d+)[ \t]+pass[ \t]+\((\d+)[ \t]+total\)", stdout)
+        if m:
+            result["tests_passed"] = float(m.group(1))
+            result["tests_total"] = float(m.group(2))
+            return result
+
         # 匹配 "X passed; Y skipped; Z failed." (Zig 0.14+ 格式)
         m = re.search(
             r"(\d+)[ \t]+passed[ \t]*;[ \t]*(\d+)[ \t]+skipped[ \t]*;[ \t]*(\d+)[ \t]+failed",

@@ -174,7 +174,19 @@ def _resolve_project_id(db: sqlite3.Connection, name_or_id: str) -> str | None:
     row = db.execute("SELECT id FROM projects WHERE id = ?", (name_or_id,)).fetchone()
     if row is not None:
         return row["id"]
-    # 按名称查找
+    # 按名称查找 — 同名多 id 场景（yaml 引入显式 id 前，旧确定性 UUID 与新 id 并存）：
+    # 取最近有 runs 活跃的 id；fetchone 无序会返回旧 id，history 显示陈旧数据
+    # （2026-08-18 实证：zigbox 新记录在新 id 下，history 命令却显示 08-09 旧基线）
+    row = db.execute(
+        """SELECT r.project_id AS id FROM runs r
+           JOIN projects p ON r.project_id = p.id
+           WHERE p.name = ? GROUP BY r.project_id
+           ORDER BY MAX(r.timestamp) DESC LIMIT 1""",
+        (name_or_id,),
+    ).fetchone()
+    if row is not None:
+        return row["id"]
+    # 无 runs 记录时按名称兜底
     row = db.execute("SELECT id FROM projects WHERE name = ?", (name_or_id,)).fetchone()
     if row is not None:
         return row["id"]
@@ -353,8 +365,12 @@ def check_regression(
 
     regressions: list[Regression] = []
 
-    # 取最近 5 次（或全部）作为基线
-    baseline_window = history[:5]
+    # 取最近 5 次 PASS（或全部）作为基线 — FAIL 记录不代表性能基线
+    # （2026-08-18 实证：新 id 冷启动期基线混入 FAIL 记录的 fd 峰值，
+    # 正常 PASS 反而报退化）
+    baseline_window = [r for r in history if r.get("status") == "PASS"][:5]
+    if not baseline_window:
+        return []
 
     # ── 性能指标回归 ──
     all_metric_names: set[str] = set()
