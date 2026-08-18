@@ -1,7 +1,7 @@
 # Task Plan: zigtester MCP 替换兄弟项目 test skills
 
 > **创建**: 2026-08-07
-> **更新**: 2026-08-08 — 插件 config 解析修复 + suite 过滤实现 + MCP Server stdio→HTTP 迁移完成
+> **更新**: 2026-08-18 — Phase 9 启动：测试环境统一治理（防绕过）+ zigtester pre-flight 自检
 > **关联**: DESIGN.md § MCP 优先架构
 
 ## Goal
@@ -10,7 +10,76 @@
 
 ## Current Phase
 
-Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅ | Phase 4 ✅ | Phase 5 ✅ | Phase 6 ✅ | Phase 7 ✅ | Phase 8 🔄
+Phase 1-7 ✅ | Phase 8 🔄 | Phase 9 ✅ | **Phase 10 ✅（2026-08-18 workflow 并行完成）**
+
+### Phase 10: 测试流畅性改进 ✅
+> **创建**: 2026-08-18（Phase 9 验证过程中踩到的摩擦点，用户裁定并行实施）
+> **实施**: workflow 4 agent 并行（Run wf_9faabef5-5e8，238K tokens / 83 tool calls / 4.9 分钟）+ 主线程统一验证。
+
+#### P10.1 报告与历史改进（agent A）✅
+- [x] `extract_failure_lines` — FAIL/ERROR suite 的终端输出（红色行）、`--json-output`、MCP `zigtester_run` 响应均含 failure_lines（主线程端到端实测：终端+JSON 均正确输出 ✗ 行）
+- [x] CLI `run --no-history`；`check_regression` 基线只统计 PASS（PASS 过滤原本已存在，补无 status 字段兼容）
+- [x] `detect_flaky(window=8, 翻转≥2)` → `zigtester_history` 响应 flaky 字段 + 终端标注
+- [x] `tests/test_report_history.py` 15/15
+
+#### P10.2 运行时鲁棒性（agent B）✅
+- [x] `_heal` 延迟复检（`_HEAL_STABILITY_DELAY=2.5s`，防死亡窗口假阳性）
+- [x] `run_workspace` 分组并行 — 无插件组 ThreadPool 并行（结果按传入顺序输出）+ 有插件组串行；fail_fast 语义保持
+- [x] `tests/test_env_guard.py` +2 用例（unstable 插件自愈 fast fail / 分组执行）→ 14/14
+
+#### P10.3 zigbox scenarios fast fail（agent C）✅
+- [x] 每组合结束后重探 echo 四端口；失联 → FATAL + 指引 zigtester + 兼容 parser 的总计行 + exit 1
+- [x] 实测：失联注入 5.4s 退出（原 238s）；正常路径 10.6s 全绿；无残留进程
+
+#### P10.4 zigroute + zigunicfg 审计（agent D）✅
+- [x] 发现 a 类直跑指引 5 处（README/CLAUDE.md/roadmap.md）全部修订；b 类 0；c 类假绿 0（exit(1) 均正确）
+- [x] 两项目无插件依赖 → 铁律节用收敛式写法（zig build test 仅限纯单元快速迭代）
+- [x] zigunicfg comprehensive 训练流水线保留手动例外（外部二进制+自有 Docker，与共享插件无关，铁律节注明例外理由）
+- [x] 顺带修正 zigroute CLAUDE.md 层级描述（unit+performance → unit，与 yaml 一致）
+
+#### P10.5 主线程统一验证 ✅
+- [x] 单测 29/29（env_guard 14 + report_history 15）；全模块 py_compile OK
+- [x] `--all unit --parallel` 8 项目全绿（分组并行生效）
+- [x] failure_lines 端到端（终端红行 + JSON 数组）✓；zigbox functional 3/3 ✓
+- 注意：MCP Server 常驻进程需重启才加载 server.py 的 failure_lines 改动
+
+#### 本次不做（记录遗留）
+- 端口真相源五处收敛（zigtester CLAUDE.md / plugin.yaml ports / 四项目 tests/lib/config.py → plugin.yaml 单源）— 后续独立任务，涉及多项目脚本改造
+- Go 测试工具 HTTP_PROXY 隐患（grpc-verify 等若用 net/http 默认 ProxyFromEnvironment）— 遇「端口在听却连不上」先查此项
+
+### Phase 9: 测试环境统一治理 + pre-flight 自检 ✅
+> **创建**: 2026-08-18 | **完成**: 2026-08-18
+> **背景**: 兄弟项目（AI agent 会话）反复绕过 zigtester 直接跑测试脚本，导致 local-echo/sing-box/xray 插件被反复启停/误杀，测试环境被破坏、结果误判。2026-08-17 已把测试脚本从"自启动 echo"改为 detect-and-error，但文档层和部分入口仍有漏洞，且 zigtester 自身在执行每个 suite 前缺少环境自检与自愈。
+
+#### P9.1: 全面调研 ✅
+- [x] 各兄弟项目文档+脚本+skill 绕过入口清点（结论见 findings.md § Phase 9 调研）
+- [x] zigtester 现有链路分析（check_port_conflicts 只在启动前做一次；中途被外杀不检测 = 误判根源之一）
+
+#### P9.2: zigtester pre-flight 自检 + 自愈 + fast fail ✅
+- [x] `plugin.py` `PluginManager`（prepare 预检+残留清理 / ensure_ready 每套件自检自愈 / stop_all）
+- [x] `verify_plugin` 三层校验：进程存活 + readiness 端口 + **端口归属进程树**（lsof TCP LISTEN+UDP bound 占用者 ⊆ 插件进程树；"可连但 lsof 不可见"= root 残留）
+- [x] 残留识别安全规则：只 pkill stop.kill 名单 + `*.py` 脚本名特征（绝不取解释器/子命令 token）
+- [x] 恢复失败 fast fail：首个 suite ERROR + 剩余 SKIP + 「测试环境规范」输出（`env_spec_message`）
+- [x] 顺带修复：HTTP_PROXY 劫持 localhost API（singbox_ctl `_http.trust_env=False`）；local-echo plugin.yaml 补 ports 声明；run_project 端口冲突时空结果误判 bug；**--parallel 多插件项目强制降级串行**（否则互杀）
+- [x] 单测 `tests/test_env_guard.py` 12/12
+
+#### P9.3: 兄弟项目文档统一修订 ✅
+- [x] zigoutbounds：test_engine.py 删 standalone 自启 sing-box → detect-and-error；CLAUDE.md 方式2/3 删除+铁律节；README/API.md/SKILL.md 同步；singbox.py 修 urllib 代理坑+文案；h2/h3 runner 报错文案
+- [x] zigbox：config/README.md 直跑清单+手动 sing-box run 删除；test_tun_scenarios.py FATAL 文案；CLAUDE.md 铁律节
+- [x] zigfoundation/zigdns/zigproxy/zigtun：CLAUDE.md 铁律节（zigfoundation 收敛"直接 zig build test"措辞）；zigtun 两处"直接运行"块改 zigtester；zigproxy 过期描述修正；zig-codegen.md 措辞；各 README 提示
+- [x] zigdns 假绿修复：test_client/test_forward/test_server detect-skip `exit(0)` → `exit(1)`
+
+#### P9.4: 验证 ✅
+- [x] 单测 12/12；zigbox functional 3/3；zigoutbounds functional 7/7；全 workspace unit 8/8（并行自动降级串行）
+- [x] 真实残留接管：环境有 PID 18973 残留 local-echo → prepare 自动清理接管 → 3/3 过
+- [x] 中途外杀插件（kill -9）→ 后续套件前自愈 → 剩余全过
+- [x] 无关进程占插件端口（blocker 监听 13338）→ 精确报"未知进程 PID"+ 不误杀 + fast fail 规范输出
+- [x] 预存 flaky 记录（非本次引入）：zigproxy test-engine burst 用例高负载下 2/17 挂（timing 敏感）；zigdns client"多域名 miss"FakeIP 全命中挂
+
+#### 遗留（用户决策/后续项目内修）
+- zigproxy burst 用例负载敏感 flaky → zigproxy 项目自修（阈值或负载自适应）
+- zigdns client "多域名 miss" FakeIP 缓存行为 → zigdns 项目自修
+- 根因记录见 findings.md
 
 ## Phases
 

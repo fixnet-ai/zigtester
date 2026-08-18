@@ -34,6 +34,16 @@ fixnet/
 5. **历史追踪** — 自动保存每次运行结果，支持性能回归检测（当前 vs 历史移动平均）
 6. **双层入口** — MCP Server（Claude Code 调用，服务端解析，节省 token）+ CLI（人类终端/CI）
 7. **插件管理** — 自动发现、构建、启动/停止测试依赖插件（echo server、sing-box 等），通过 `plugin.yaml` 声明生命周期
+8. **环境自检自愈**（2026-08-18）— 每个测试套件执行前 pre-flight 自检插件环境（进程存活 + readiness 端口 + **端口归属进程树校验**，lsof + ps 实现）；被外部破坏（兄弟项目会话误杀/残留进程抢端口）时自动清理恢复（仅清理可识别的插件残留，未知进程不误杀）；恢复失败 fast fail 并输出「测试环境规范」指引 AI agent 经 zigtester 运行。见 `plugin.py` `PluginManager` / `verify_plugin` / `env_spec_message`，单测 `tests/test_env_guard.py`
+
+### 测试环境治理铁律（生态级，2026-08-18 用户裁定）
+
+**所有 zig* 项目的测试（调试、验证、回归）必须经 zigtester 执行**，各项目 CLAUDE.md 已同步写入铁律：
+
+- 兄弟项目测试脚本只探测依赖服务（detect-and-error），绝不自启 echo/sing-box/xray
+- 任何会话禁止手动启停插件进程（`sing-box run` / `xray run` / local-echo 二进制 / `pkill` 插件名）
+- 环境异常时唯一正确动作 = 重新 `zigtester run`（自检自愈机制会恢复环境）
+- ⚠️ 访问 127.0.0.1 的 HTTP 客户端必须禁用代理（`requests` 用 `trust_env=False`，`urllib` 用 `ProxyHandler({})`）— 本机 HTTP_PROXY 会劫持 localhost 请求导致假判"插件未运行"
 
 ### 设计原则
 

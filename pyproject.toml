@@ -1,6 +1,6 @@
 [project]
 name = "zigtester"
-version = "0.1.0"
+version = "0.24.0"
 description = "fixnet 生态自动测试框架 — MCP 优先 + CLI 辅助"
 readme = "README.md"
 license = {text = "MIT"}

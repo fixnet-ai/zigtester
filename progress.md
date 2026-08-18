@@ -1,5 +1,72 @@
 # Progress Log
 
+## Session: 2026-08-18（续）Phase 10 测试流畅性改进 — workflow 并行实施 ✅
+- **Status:** complete（workflow wf_9faabef5-5e8：4 agent 并行，238K tokens / 83 tool calls / 4.9 分钟）
+- Agent A（zigtester reporter/cli/server/history + 新单测）:
+  - `extract_failure_lines()`（✗/FAIL/ERROR: 行，去 ANSI，≤10 行，160 字符截断）接入三层：终端失败套件红色行、save_json 的 failure_lines、MCP zigtester_run 响应
+  - CLI `--no-history`；check_regression 基线 PASS 过滤（原已存在，补无 status 兼容 `r.get("status","PASS")`）
+  - `detect_flaky(window=8, 翻转≥2)` → zigtester_history 响应 + 终端标注
+  - tests/test_report_history.py 15/15
+- Agent B（zigtester plugin/runner）:
+  - `_heal` 延迟复检 `_HEAL_STABILITY_DELAY=2.5s`（死亡窗口假阳性教训注释）
+  - `run_workspace` 分组并行：无插件组 ThreadPool（结果按传入顺序）+ 有插件组串行，fail_fast 保留
+  - test_env_guard.py +2（unstable 1 秒自杀插件自愈应 fatal；分组执行）→ 14/14
+- Agent C（zigbox）:
+  - test_scenarios.py 每组合后重探 echo 四端口；失联 → FATAL + zigtester 指引 + 兼容 parser 总计行 + exit 1；汇总抽为 _print_summary()
+  - 实测：正常 10.6s 全绿；失联注入 5.4s 退出（原 238s）；无残留
+- Agent D（zigroute/zigunicfg 审计）:
+  - a 类直跑指引 5 处修订（README/CLAUDE.md/docs/roadmap.md）；b/c 类 0
+  - 两项目无插件 → 收敛式铁律；zigunicfg comprehensive 训练流水线保留手动例外（外部二进制+自有 Docker，铁律注明理由）
+  - 修正 zigroute 层级描述（unit+performance → unit）
+- 主线程统一验证:
+  - 单测 29/29；py_compile 全过；--all unit --parallel 8/8 全绿（分组生效）
+  - failure_lines 端到端 ✓（插曲：首次验证命令 `exit 1` 是 Python 语法错误导致 stdout 空，误判功能不工作；修正为 SystemExit(1) 后确认终端红行 + JSON 数组均正常）
+  - zigbox functional 3/3
+- 提醒: MCP Server（9020 常驻）需重启加载 server.py 改动
+
+### MCP 服务 description 优化 ✅
+- `FastMCP("zigtester", instructions=...)` — 新增 server 级说明（637 字，initialize 下发）：唯一入口定位 + 三条核心约定（禁直跑脚本/禁手动启停插件/ERROR 时唯一动作=重新 run）+ 工具选择决策表 + 代理诊断提示
+- 5 个工具 docstring 重写（即 MCP description）：
+  - scan（150 字）— 用一次即弃、path 即后续 dir 参数
+  - list（166 字）— 运行前确认层级/套件名/sudo，套件名是 history 参数来源
+  - run（376 字）— 唯一入口 + 自动环境管理 + 结果解读（report 原样展示 / failure_lines 定根因 / ERROR=环境问题 / suite 最小复现）
+  - history（204 字）— flaky 语义（单次结果不足为凭）、基线只统计 PASS
+  - init（125 字）— 推荐改用 create-tester skill 交互式接入
+- 验证：py_compile OK；重启后 initialize 响应含 instructions（实测 637 字）；tools/list 5 个 description 全部为新文案
+
+## Session: 2026-08-18
+
+### Phase 9: 测试环境统一治理 + pre-flight 自检 ✅
+- **Status:** complete
+- Actions taken:
+  - **zigtester（B 面强化）**:
+    - `plugin.py` — 新增 `PluginManager`（prepare/ensure_ready/stop_all）、`verify_plugin` 三层校验（进程存活 + readiness 端口 + 端口归属进程树）、`_descendant_pids`/`_port_owner_map`（一次 ps + 一次 lsof）、`_cleanup_stale_processes`（仅清可识别插件残留，未知进程不误杀）、`env_spec_message`（fast fail 测试环境规范）
+    - `plugin.py` 残留识别安全规则 — 只取 stop.kill 名单 + `*.py` 脚本名作 pkill 特征（`python3`/`serve` 等通用 token 会误杀 zigtester 自身/无关进程）
+    - `runner.py` — run_project 重构接入 PluginManager；每套件前 ensure_ready 自检自愈；恢复失败 fast fail（首 suite ERROR + 剩余 SKIP + 规范输出）；`--parallel` 多插件项目强制降级串行（否则互杀）；修端口冲突时空结果误判 bug
+    - `plugins/local-echo/plugin.yaml` — 补 ports 声明（9 端口，启用归属校验）
+    - `plugins/sing-box/singbox_ctl.py` — **修 HTTP_PROXY 劫持 localhost API bug**（`_http = requests.Session(); trust_env=False`；根因：本机 HTTP_PROXY=127.0.0.1:7890 且 no_proxy 空 → /version 假失败 → serve exit 1 → 之前每轮"自愈成功"实为 3 秒死亡窗口假阳性）
+    - `tests/test_env_guard.py` — 新建 12 用例单测（进程树/端口归属/健康/死亡/外部抢占/自愈/不可恢复 fast fail/残留清理/未知占用不误杀/规范文本/runner 辅助）
+    - `CLAUDE.md` — 核心职责补环境自检自愈 + 生态级测试环境治理铁律
+  - **zigoutbounds（最大绕过入口）**:
+    - `test_engine.py` — 删 `start_standalone_singbox()` 自启路径 → detect-and-error；删孤立 finally 清理块
+    - `tests/lib/singbox.py` — 修 urllib 代理坑（`ProxyHandler({})` opener）+ docstring/状态文案
+    - `tests/lib/xray.py`、`tests/lib/test_config.py` — "将自行启动"文案 → "请经 zigtester run 启动"
+    - `tests/h2-e2e/runner.py`、`tests/h3-e2e/runner.py` — 报错文案去掉手动启动选项
+    - CLAUDE.md（铁律节 + 方式2/3 删除 + 最小复现命令改 --suite）、README.md 快速开始、API.md 运行方式、SKILL.md（铁律节 + 手动 sing-box 删除 + 单套件复现改 zigtester）
+  - **zigbox**: config/README.md（直跑清单 + 手动 sing-box run 删除，改 zigtester 入口）；test_tun_scenarios.py FATAL 文案（去手动 sudo 启动指引）；CLAUDE.md 铁律节
+  - **zigfoundation/zigdns/zigproxy/zigtun**: CLAUDE.md 统一铁律节（foundation/dns 收敛"直接 zig build test"措辞；proxy 修过期描述；zigtun 两处"直接运行"块改 zigtester）；README 提示；zig-codegen.md:2098 措辞
+  - **zigdns 假绿修复**: test_client/test_forward/test_server detect-skip `exit(0)` → `exit(1)`
+- Verification:
+  - 单测 12/12 ✅
+  - zigbox functional 3/3 ✅（含真实残留 PID 18973 自动清理接管场景）
+  - zigoutbounds functional 7/7 ✅
+  - 全 workspace unit 8/8 ✅（--parallel 自动降级串行）
+  - 中途 kill -9 插件 → 后续套件自愈 → 全过 ✅
+  - blocker 占 13338 → 精确报未知进程 PID + 不误杀 + fast fail 规范 ✅
+- 预存 flaky（非本次引入，待项目内修）:
+  - zigproxy test-engine burst 用例高负载下 2/17 挂（timing 敏感；安静环境 5/5 过）
+  - zigdns client "多域名 miss" FakeIP 全命中（缓存行为）
+
 ## Session: 2026-08-10
 
 ### xray-core 插件 + 跨参考实现互测 🔄

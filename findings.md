@@ -1,5 +1,66 @@
 # Findings & Decisions
 
+## Phase 9 调研与环境自检发现（2026-08-18）
+
+### 兄弟项目绕过入口清单（按风险排序）
+
+| 风险 | 项目 | 位置 | 问题 |
+|------|------|------|------|
+| 🔴 高 | zigoutbounds | tests/test_engine/test_engine.py:267-280 `start_standalone_singbox()` | sing-box 插件未运行时**自动拉起脱离插件管理的 sing-box**（唯一残留的自动绕过通道） |
+| 🔴 高 | zigoutbounds | CLAUDE.md:102-106「方式 2/方式 3」、API.md:490-494、SKILL.md、README.md:30-35 | 文档明文授权手动 `sing-box run` 与 standalone 模式 |
+| 🔴 高 | zigbox | config/README.md:49, 83-95 | 「或直接调用 tests/ 脚本」6 条直跑命令 + 手动 `sing-box run` 指引 |
+| 🟡 中 | zigbox | tests/test_tun_scenarios.py:310-312 | FATAL 文案教手动 sudo 启动 local-echo |
+| 🟡 中 | zigtun | CLAUDE.md:123-127,164-170、README.md:83 | 「直接运行」与 zigtester 并列给出（未禁止） |
+| 🟡 中 | zigfoundation/zigdns | CLAUDE.md:138 / :95 | 「也可以直接 zig build test」措辞泛化授权 |
+| 🟡 中 | zigproxy | CLAUDE.md:83 | 「仅包含单元测试层级」过期（实际有 functional/perf/stress） |
+| 🟠 质 | zigdns | test_client.py:25 / test_forward.py:39 | detect-and-skip 后 `sys.exit(0)` — **绕过直跑得到假阳性全绿** |
+| 🟢 低 | 多项目 | zig-codegen.md:2098 | 教直接跑 `.zig-cache` 测试二进制（unit 级，破坏面小但措辞需收敛） |
+
+共性缺口：6 项目均无「禁止绕过 zigtester」强制条文；文档与 detect-and-error 脚本规范自相矛盾。
+
+### HTTP_PROXY 劫持 localhost API（重要 bug，2026-08-18）
+
+**现象**：sing-box 插件每次 `zigtester run` 后 3 秒内 exit 1（"sing-box API health check failed"），zigtester 自愈"成功"实为 serve 死亡前 3 秒窗口的假阳性（每 suite 前反复自愈循环）。
+
+**根因**：本机环境 `HTTP_PROXY=http://127.0.0.1:7890` 且 `no_proxy` 为空 → `requests.get("http://127.0.0.1:9090/version")` 被代理劫持 → health check 假失败 → singbox_ctl serve exit 1。TCP 层 9090 可连（zigtester ready_on 通过）但 HTTP 层失败。
+
+**修复**：`singbox_ctl.py` 模块级 `_http = requests.Session(); _http.trust_env = False`，所有 API 调用绕过代理环境变量。
+
+**教训**：任何访问 127.0.0.1 的 HTTP 客户端（requests/urllib）都必须禁用代理（`trust_env=False` 或 `proxies={"http": None}`），否则在有代理的开发机上必挂。zigoutbounds tests/lib/singbox.py 若用 requests/curl 检测 9090 也需同样处理。
+
+### 环境自检架构（PluginManager，2026-08-18）
+
+三层校验（verify_plugin）：
+1. 进程存活（proc.poll()）
+2. readiness 端口可连（ready_on TCP）
+3. **端口归属**：声明端口的占用者（lsof TCP LISTEN + UDP bound）必须含插件进程树成员（ps ppid 链上溯）；「可连但 lsof 不可见」= root 残留进程，同样异常
+
+自愈（ensure_ready → _heal）：stop（含 kill 名单）→ 等端口释放 → 重启 → 复检；失败 fast fail。
+
+残留识别安全规则（_plugin_proc_hints）：**只取 stop.kill 名单 + `*.py` 脚本名**作为 pkill 特征。绝不取解释器/子命令 — `python3` 会误杀 zigtester 自身，`serve` 会误杀任何含该词的进程。
+
+未知进程占用端口 → 不杀（防误杀），fast fail 报 PID + cmdline。
+
+prepare 阶段已知插件残留（如上一轮异常退出的 local-echo）→ 自动清理接管，无需人工干预（实测 PID 18973 场景）。
+
+### pkill/pgrep 自匹配陷阱（测试方法教训）
+
+测试脚本用 `pkill -f "local-echo --tcp-port"` 时，**外层 bash 命令行自身含该串** → pkill 杀了自己的 shell。规避：`pgrep -f "[l]ocal-echo --tcp-port"`（字符类正则使模式不匹配字面自身）。
+
+### Phase 9 验证中发现的流畅性摩擦点（2026-08-18，→ Phase 10）
+
+| # | 摩擦 | 亲历 | 处置 |
+|---|------|------|------|
+| 1 | **FAIL 时看不到失败用例名** — `✗ 用例名` 在 stdout，而 `--verbose` 只显示 metrics、`--json-output` 不含 stdout、MCP 只有 stderr_tail。zigproxy 14/17 挂时为拿 2 个用例名写脚本调内部 `run_project()` 花了数轮 | 是 | P10.1 |
+| 2 | **破坏性运行污染 history** — 杀 echo 的 238s 记录、fast fail 的 ERROR 全进了基线，性能回归检测的移动平均被拉歪 | 是 | P10.1 |
+| 3 | **自愈「死亡窗口假阳性」** — sing-box 代理 bug 期间每轮自愈"成功"均为 serve 死亡前 3 秒窗口的假象；结构性风险：ready_on 通过 ≠ 进程稳定 | 是 | P10.2 |
+| 4 | **flaky 无标注** — zigproxy burst（负载敏感）/zigdns FakeIP（缓存）同代码异结果，history 里表现为指标抖动无法辨识 | 是 | P10.1（检测）+ 项目内修根因 |
+| 5 | **并行一刀切降级浪费** — 多插件项目出现即全串行；无插件项目（zigfoundation/zigroute/zigunicfg）本可并行 | 是 | P10.2 |
+| 6 | **zigbox scenarios 依赖失联拖 238s**（正常 12s）— 脚本内部长重试不 fast fail | 是 | P10.3 |
+| 7 | **端口真相源分散 5 处** — zigtester CLAUDE.md / plugin.yaml ports / 四项目 tests/lib/config.py，改一处同步五处迟早漂移 | 是 | 遗留（后续独立任务） |
+| 8 | **zigroute/zigunicfg 未审计** — `--all` 跑出这两个已接入项目，但 Phase 9 只查了用户点名的 6 项目 | — | P10.4 |
+| 9 | **Go 客户端 HTTP_PROXY 隐患** — grpc-verify 等若用 net/http 默认 ProxyFromEnvironment，同 Python 坑 | 推测 | 遗留（提醒） |
+
 ## Requirements
 
 - 用 zigtester MCP 替换兄弟项目（zigbox/zigoutbounds/zigfoundation/zigtun/zigproxy/zigdns）测试 skill 中的命令执行和结果解析内容
