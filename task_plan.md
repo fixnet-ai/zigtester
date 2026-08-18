@@ -10,7 +10,35 @@
 
 ## Current Phase
 
-Phase 1-7 ✅ | Phase 8 🔄 | Phase 9 ✅ | **Phase 10 ✅（2026-08-18 workflow 并行完成）**
+Phase 1-7 ✅ | Phase 8 🔄 | Phase 9 ✅ | Phase 10 ✅ | **Phase 11 ✅（2026-08-18 workflow 并行完成）**
+
+### Phase 11: flaky 根因修复 + 插件管道排空 ✅
+> **创建**: 2026-08-18 | **完成**: 2026-08-18（workflow wf_95e67554-b2a：2 agent，118K tokens / 9.6 分钟）
+
+#### P11.1 zigproxy burst flaky ✅
+- [x] 根因 = **测试客户端超时设计缺陷**（非 relay 退化）：`_burst_forward_request` 设 8s 后被 `_read_http_response` 内部 `settimeout(5)` 静默覆盖；create_connection 3s（同文件其他场景均 10s）
+- [x] 修复：连接超时 3→10s + 显式传 timeout=8；11 个 CPU spinner 满载下连续 5 次 16/16 PASS + 安静 1 次 PASS
+
+#### P11.2 zigdns「多域名 miss」✅
+- [x] 根因 = **测试期望自创建起即错**：5533 是 local-echo FakeIP 模式端口，echo.* 按设计返回确定性 FakeIP（real-map 是 15353 行为）；zigdns src 无 bug
+- [x] 修复：期望改为 FakeIP + 新增三域名 FakeIP 互不相同断言（固化哈希分散语义）；连续 5 次 3/3 PASS
+
+#### P11.3 插件 PIPE drain ✅
+- [x] `_start_plugin_process` 增 plugin_name 参数 + stdout/stderr 双 daemon 线程逐行写 `/tmp/zigtester-plugin-<name>.log`（wb truncate）；`plugin_log_path()` 辅助；env_spec 排查行加日志路径
+- [x] 单测 +1（chatty 200KB 不阻塞）→ 15/15 × 3 连绿
+- [x] 实测 drain 生效：zigbox run 后三插件日志齐全（local-echo 含 RESULT=READY）
+
+#### P11.4 主线程统一验证 ✅
+- [x] 单测 30/30（env_guard 15 + report_history 15）；zigbox 3/3；zigproxy 5/5；zigdns 3/3（后两者首次长期全绿）
+
+#### 新观察（AB 报告，未修待后续）
+- **极端满载（10 核 spinners）下 local-echo 插件启动偶发失败**（4 次中 1 次 ERROR）——失败阶段未定位（go build 慢 or ready 超时），真实场景罕见；若复现先查 /tmp/zigtester-plugin-local-echo.log
+- AB 曾观察到 plugin.py `_drain` 中间态崩溃（logf.write bytes vs text 模式）——C 并行开发时的临时态，最终版已修复并 3 连绿验证
+
+#### 仍遗留（本轮不做）
+- 端口真相源五处收敛（中工程量，涉及多项目脚本改造）
+- Go 工具 HTTP_PROXY 隐患验证
+- Phase 8 P8.3 xray 套件接入（规划滞后需核实重写）
 
 ### Phase 10: 测试流畅性改进 ✅
 > **创建**: 2026-08-18（Phase 9 验证过程中踩到的摩擦点，用户裁定并行实施）

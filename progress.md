@@ -1,5 +1,20 @@
 # Progress Log
 
+## Session: 2026-08-18（续二）Phase 11 flaky 根因修复 + 插件管道排空 ✅
+- **Status:** complete（workflow wf_95e67554-b2a：AB 独占插件环境顺序修两项目 / C 只做自包含单测）
+- zigproxy burst flaky（AB）:
+  - 根因：测试客户端超时缺陷——_burst_forward_request 的 8s 被 _read_http_response 内部 settimeout(5) 静默覆盖；create_connection 3s（其他场景 10s）。高负载误判"超时"，非 relay 退化（满载 12 次无 0 字节/重置失败）
+  - 修复：连接超时 3→10s + 显式 timeout=8；11 spinner 满载 5 连绿 + 安静 1 绿
+- zigdns「多域名 miss」（AB）:
+  - 根因：测试期望自创建即错——5533 是 FakeIP 端口，echo.* 按设计返回确定性 FakeIP；real-map 是 15353 行为。src 无 bug
+  - 修复：期望改 FakeIP + 三域名 FakeIP 互不相同断言（固化哈希分散语义）；5 连 3/3
+- 插件 PIPE drain（C）:
+  - _start_plugin_process +plugin_name 参数 + stdout/stderr 双 daemon 线程逐行写 /tmp/zigtester-plugin-<name>.log（wb truncate、逐行 flush）；plugin_log_path()；env_spec 加日志路径提示
+  - 单测 +chatty 200KB 不阻塞用例 → 15/15 × 3；实测 zigbox run 后三插件日志齐全
+  - C 调试插曲：text 模式写 bytes 报 TypeError → 改 wb；日志缺行确认为子进程 stdio 块缓冲（flush=True 解决）
+- 主线程统一验证: 单测 30/30；zigbox 3/3；zigproxy 5/5；zigdns 3/3（后两者首次长期全绿）
+- 新观察（未修）: 极端满载（10 核 spinners）下 local-echo 启动偶发 ERROR（4 次 1 失败），失败阶段未定位；复现时先查 /tmp/zigtester-plugin-local-echo.log
+
 ## Session: 2026-08-18（续）Phase 10 测试流畅性改进 — workflow 并行实施 ✅
 - **Status:** complete（workflow wf_9faabef5-5e8：4 agent 并行，238K tokens / 83 tool calls / 4.9 分钟）
 - Agent A（zigtester reporter/cli/server/history + 新单测）:
