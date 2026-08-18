@@ -337,6 +337,21 @@ def list_projects() -> list[dict]:
     return [{"id": row["id"], "name": row["name"], "path": row["path"]} for row in rows]
 
 
+def detect_flaky(records: list[dict], window: int = 8) -> bool:
+    """检测套件是否 flaky（结果不稳定）。
+
+    取最近 window 条记录的 status 序列，PASS 与 FAIL/ERROR 之间
+    翻转次数 >= 2 视为 flaky。记录不足 4 条返回 False。
+    """
+    if len(records) < 4:
+        return False
+
+    statuses = [r.get("status", "") for r in records[:window]]
+    flags = [s == "PASS" for s in statuses if s in ("PASS", "FAIL", "ERROR")]
+    flips = sum(1 for i in range(1, len(flags)) if flags[i] != flags[i - 1])
+    return flips >= 2
+
+
 # ── 回归检测 ────────────────────────────────────────────────
 
 def check_regression(
@@ -368,7 +383,9 @@ def check_regression(
     # 取最近 5 次 PASS（或全部）作为基线 — FAIL 记录不代表性能基线
     # （2026-08-18 实证：新 id 冷启动期基线混入 FAIL 记录的 fd 峰值，
     # 正常 PASS 反而报退化）
-    baseline_window = [r for r in history if r.get("status") == "PASS"][:5]
+    baseline_window = [
+        r for r in history if r.get("status", "PASS") == "PASS"
+    ][:5]
     if not baseline_window:
         return []
 

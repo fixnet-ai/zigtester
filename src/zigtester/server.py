@@ -21,7 +21,27 @@ from fastmcp import FastMCP
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 9020
 
-mcp = FastMCP("zigtester")
+# Server 级说明 — initialize 时下发给客户端，是 agent 对 zigtester 的第一手认知
+_INSTRUCTIONS = """zigtester — fixnet 生态统一测试框架，所有 zig* 项目测试的唯一入口。
+
+核心约定（必须遵守）：
+1. 所有测试一律经本框架执行（zigtester_run）。禁止直接运行项目测试脚本
+   （python3 tests/...）——脚本只探测依赖服务不负责启动，直跑必然报错或产生假结果。
+2. 测试依赖进程（local-echo / sing-box / xray-core）由插件统一启停。禁止任何
+   会话手动启停：sing-box run / xray run / 直接运行 local-echo / pkill 插件进程名，均禁止。
+3. 每个测试套件执行前自动自检插件环境（进程存活 + 端口归属），被破坏时自动
+   清理恢复；恢复失败则该套件 ERROR，setup_error 含环境规范全文——此时唯一
+   正确动作是重新调用 zigtester_run，不要手工修复或手动启停插件。
+
+工具选择：
+- 不确定有哪些项目/项目路径 → zigtester_scan（了解后不再需要）
+- 查看项目测试套件/层级/套件名 → zigtester_list
+- 运行测试 / 单套件最小复现 → zigtester_run
+- 性能趋势 / 回归判断 / flaky 识别 → zigtester_history
+
+诊断提示：本机若配置 HTTP_PROXY，curl 访问 127.0.0.1 需加 --noproxy '*'。"""
+
+mcp = FastMCP("zigtester", instructions=_INSTRUCTIONS)
 
 
 # ── 辅助 ──────────────────────────────────────────────────
@@ -54,14 +74,14 @@ def _load_project(dir: str | None) -> "DiscoveredProject | None":
 
 @mcp.tool()
 def zigtester_scan(dir: str | None = None) -> dict:
-    """发现目录树下所有包含 zigtester.yaml 的项目（辅助工具）。
+    """发现目录树下所有接入 zigtester 的项目（名称 + 路径 + 层级概览）。
 
-    仅在不确定有哪些项目时使用一此，了解项目名后直接用
-    zigtester_list / zigtester_run + 项目目录路径即可，
-    不需要每次都 scan。
+    仅在不确定有哪些项目/项目路径时使用一次；了解项目后直接用
+    zigtester_list / zigtester_run 传项目路径即可，不要每次都 scan。
+    返回的 path 是后续工具 dir 参数应传的值。
 
     Args:
-        dir: 扫描根目录，默认当前目录
+        dir: 扫描根目录（默认当前目录；日常用 fixnet 工作区根目录）
     """
     from .scanner import discover
 
@@ -85,13 +105,14 @@ def zigtester_scan(dir: str | None = None) -> dict:
 
 @mcp.tool()
 def zigtester_list(dir: str | None = None) -> dict:
-    """列出项目中的所有测试套件。
+    """列出项目的全部测试套件（按 unit/functional/performance/stress 分组）。
 
-    dir 指向项目目录（或其任意子目录），工具自动向上查找
-    zigtester.yaml。不传则用当前目录。
+    运行测试前先用它确认：层级名、套件名、套件是否需要 sudo——
+    zigtester_run 的 level/suite 参数必须与此处名称一致。
+    套件名也是 zigtester_history 的 suite 参数来源。
 
     Args:
-        dir: 项目目录路径（或其子目录），默认当前目录
+        dir: 项目目录路径（或其任意子目录，自动向上查找 zigtester.yaml），默认当前目录
     """
     p = _load_project(dir)
 
@@ -127,18 +148,23 @@ def zigtester_run(
     suite: str | None = None,
     dir: str | None = None,
 ) -> dict:
-    """执行测试并返回结构化结果。
+    """执行测试并返回结构化结果 — 所有测试的唯一入口。
 
-    dir 指向项目目录（或其任意子目录），工具自动向上查找
-    zigtester.yaml。不传则用当前目录。
+    服务端自动完成：依赖插件启停（local-echo/sing-box/xray-core）、
+    每个套件执行前环境自检（进程存活+端口归属）、环境被破坏时自动恢复。
 
-    返回的 `report` 字段是预格式化的 Markdown 表格，**必须原样展示给用户**，
-    不要改写、摘抄或重新排版。
+    结果解读：
+    - `report` 字段是预格式化 Markdown 表格，**必须原样展示给用户**，不要改写摘抄
+    - 失败套件（FAIL）→ 看 `failure_lines`（具体失败用例行）和 `stderr_tail` 定位根因
+    - ERROR 套件 → 通常是环境问题而非代码问题；`setup_error` 含环境规范全文，
+      唯一正确动作是重新调用本工具（自动恢复环境），禁止手动启停插件进程
+    - SKIP = 前序失败/环境缺失联动跳过
+    - 单套件最小复现：suite 传套件名（自动含其依赖），比全量更快定位问题
 
     Args:
-        level: 测试层级 (unit/functional/performance/stress/all)，默认 all
-        suite: 指定套件名（可选，不指定则运行该层级所有套件）
-        dir: 项目目录路径（或其子目录），默认当前目录
+        level: 测试层级 unit/functional/performance/stress/all，默认 all
+        suite: 仅运行指定套件（名称先经 zigtester_list 查询），可选
+        dir: 项目目录路径（或其任意子目录，自动向上查找 zigtester.yaml），默认当前目录
     """
     from .config import VALID_LEVELS
     from .reporter import Reporter
@@ -178,7 +204,12 @@ def zigtester_run(
             "metrics": s.metrics,
             "message": s.message,
         }
-        # 仅失败时包含 stderr 摘要（最多 500 字符）
+        # 仅失败时包含失败用例行（数据源 stdout）和 stderr 摘要（最多 500 字符）
+        if s.status in ("FAIL", "ERROR"):
+            from .reporter import extract_failure_lines
+            failure_lines = extract_failure_lines(s.stdout)
+            if failure_lines:
+                entry["failure_lines"] = failure_lines
         if s.status in ("FAIL", "ERROR") and s.stderr:
             entry["stderr_tail"] = s.stderr[-500:]
         if s.setup_error:
@@ -222,22 +253,27 @@ def zigtester_history(
     suite: str,
     limit: int = 10,
 ) -> dict:
-    """查看性能历史 + 回归检测。
+    """查看套件历史趋势 + 回归检测 + flaky 识别。
 
-    只返回趋势摘要和异常标记，不返回完整历史数据。
+    适用场景：性能优化前后对比、判断指标是否退化、确认结果是否稳定。
+    - regressions 中 is_regression=true 表示当前值显著偏离历史基线（基线只
+      统计 PASS 记录，环境破坏数据不污染）
+    - flaky=true 表示近期 PASS/FAIL 反复翻转——该套件结果不稳定，
+      单次运行不足为凭，需多次确认后再下结论
 
     Args:
-        project: 项目名
-        suite: 套件名
+        project: 项目名（zigtester_scan 返回的 name）
+        suite: 套件名（zigtester_list 返回的名称）
         limit: 返回记录数（默认 10）
     """
-    from .history import check_regression, load_history
+    from .history import check_regression, detect_flaky, load_history
 
     records = load_history(project, suite, n=limit)
     current_metrics = records[0].get("metrics", {}) if records else {}
     current_resource = records[0].get("resource", {}) if records else {}
 
     regressions = check_regression(current_metrics, records, current_resource=current_resource)
+    flaky = detect_flaky(records)
 
     # 精简历史（只保留时间戳和指标）
     runs_out = []
@@ -252,6 +288,7 @@ def zigtester_history(
     return {
         "project": project,
         "suite": suite,
+        "flaky": flaky,
         "runs": runs_out,
         "regressions": [
             {
@@ -268,7 +305,10 @@ def zigtester_history(
 
 @mcp.tool()
 def zigtester_init(dir: str, project: str) -> dict:
-    """为项目生成初始 zigtester.yaml 配置模板。
+    """为项目生成初始 zigtester.yaml 配置模板（新项目接入 zigtester 用）。
+
+    生成后按项目实际测试命令编辑模板再使用；已有配置时不会覆盖。
+    更推荐交互式接入：见 zigtester 仓库的 create-tester skill。
 
     Args:
         dir: 项目目录路径

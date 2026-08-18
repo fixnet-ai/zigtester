@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Any
@@ -45,6 +46,29 @@ _STATUS_ICONS = {
     "SKIP": "○",
     "ERROR": "⚠",
 }
+
+
+# ANSI 色码（提取失败行时剥离）
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def extract_failure_lines(text: str, limit: int = 10) -> list[str]:
+    """从原始输出提取失败用例行。
+
+    匹配含 "✗" / "FAIL" / "ERROR:" 的行，剥离 ANSI 色码，
+    strip 后每行截断 160 字符，最多 limit 行。
+    """
+    if not text:
+        return []
+    lines: list[str] = []
+    for raw in text.splitlines():
+        stripped = _ANSI_RE.sub("", raw).strip()
+        if "✗" not in stripped and "FAIL" not in stripped and "ERROR:" not in stripped:
+            continue
+        lines.append(stripped[:160])
+        if len(lines) >= limit:
+            break
+    return lines
 
 
 def _fmt_resource(rp: "ResourceSnapshot") -> str:
@@ -299,6 +323,11 @@ class Reporter:
         elif self.verbose and suite.resource_peak.sample_count == 0:
             print(f"      {_DIM}res: n/a{_RESET}")
 
+        # 失败/错误套件：打印失败用例行（始终显示，非 verbose 也展示关键信息）
+        if suite.status in ("FAIL", "ERROR") and suite.stdout:
+            for fl in extract_failure_lines(suite.stdout):
+                print(f"      {_RED}{fl}{_RESET}")
+
         # 显示 setup/teardown 错误（始终显示，非 verbose 也展示关键信息）
         if suite.setup_error:
             print(f"      {_YELLOW}⚠ setup: {suite.setup_error}{_RESET}")
@@ -411,6 +440,11 @@ class Reporter:
                     "sample_count": s.resource_peak.sample_count,
                 },
             }
+            # 失败/错误套件附带失败用例行（数据源 stdout）
+            if s.status in ("FAIL", "ERROR"):
+                failure_lines = extract_failure_lines(s.stdout)
+                if failure_lines:
+                    d["failure_lines"] = failure_lines
             if s.setup_error:
                 d["setup_error"] = s.setup_error
             if s.teardown_error:
@@ -555,9 +589,11 @@ class Reporter:
     ) -> None:
         """打印历史记录和回归检测结果。"""
         if self.format == "json":
+            from .history import detect_flaky
             print(json.dumps({
                 "project": project,
                 "suite": suite,
+                "flaky": detect_flaky(records),
                 "runs": [
                     {
                         "timestamp": r.get("timestamp"),
@@ -585,6 +621,11 @@ class Reporter:
         if not records:
             print("  (无历史记录)")
             return
+
+        # flaky 标注（结果不稳定）
+        from .history import detect_flaky
+        if detect_flaky(records):
+            print(f"  {_YELLOW}⚠ flaky: 近期结果在 PASS/FAIL 间反复翻转{_RESET}")
 
         print(f"  {'时间':<22} {'状态':<6} {'耗时':>8}  指标")
         print(f"  {'-'*22} {'-'*6} {'-'*8}  {'-'*30}")

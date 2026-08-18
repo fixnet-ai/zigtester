@@ -99,14 +99,15 @@ def cmd_run(args: argparse.Namespace) -> int:
         if args.json_output:
             reporter.save_json(pr, args.json_output)
 
-        # 保存历史
-        try:
-            from .history import save_run
-            from .config import ensure_project_id
-            pid = ensure_project_id(target_projects[0].config_path, target_projects[0].config)
-            save_run(pr, pid, target_projects[0].path)
-        except Exception:
-            pass
+        # 保存历史（--no-history 跳过，避免污染性能基线）
+        if not args.no_history:
+            try:
+                from .history import save_run
+                from .config import ensure_project_id
+                pid = ensure_project_id(target_projects[0].config_path, target_projects[0].config)
+                save_run(pr, pid, target_projects[0].path)
+            except Exception:
+                pass
 
         all_ok = all(s.status in ("PASS", "SKIP") for s in pr.suites)
         return 0 if all_ok else 1
@@ -135,20 +136,21 @@ def cmd_run(args: argparse.Namespace) -> int:
                 json.dump(output, f, indent=2, ensure_ascii=False)
             print(f"  报告已保存: {args.json_output}")
 
-        # 保存历史
-        try:
-            from .history import save_run
-            from .config import ensure_project_id
-        except Exception:
-            pass
-        for i, pr in enumerate(ws.projects):
+        # 保存历史（--no-history 跳过，避免污染性能基线）
+        if not args.no_history:
             try:
-                proj = target_projects[i] if i < len(target_projects) else None
-                pid = ensure_project_id(proj.config_path, proj.config) if proj else pr.project
-                path = proj.path if proj else ""
-                save_run(pr, pid, path)
+                from .history import save_run
+                from .config import ensure_project_id
             except Exception:
                 pass
+            for i, pr in enumerate(ws.projects):
+                try:
+                    proj = target_projects[i] if i < len(target_projects) else None
+                    pid = ensure_project_id(proj.config_path, proj.config) if proj else pr.project
+                    path = proj.path if proj else ""
+                    save_run(pr, pid, path)
+                except Exception:
+                    pass
 
         all_ok = all(
             s.status in ("PASS", "SKIP")
@@ -249,6 +251,8 @@ def main() -> None:
                        help="首个失败即停止")
     p_run.add_argument("--parallel", action="store_true",
                        help="并行执行多个项目（仅 --all 模式有效）")
+    p_run.add_argument("--no-history", action="store_true",
+                       help="不保存本次运行结果到历史（避免污染性能基线）")
 
     # ── history ───────────────────────────────────────────
     p_hist = sub.add_parser("history", help="查看性能历史")
