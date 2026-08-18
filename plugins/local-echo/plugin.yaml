@@ -1,5 +1,18 @@
 name: local-echo
 description: "统一 Go echo 服务(2026-08-17 重做):TCP+UDP :13333 + bench :13337(短连接 10ms idle) + stream :13338(长连接无 idle) + h2 :13335 + h3 :13336 + DNS :5533(FakeIP)/:15353(real-map) + HTTP :18080 + TLS :18443 — 单程序高性能"
+
+# 监听端口列表 — 用于 zigtester 端口冲突预检 + 每套件前环境自检（端口归属校验）
+ports:
+  - 13333     # TCP+UDP 协议自适应 echo
+  - 5533      # DNS echo (FakeIP, UDP)
+  - 15353     # DNS echo (real-map, UDP)
+  - 13335     # h2 echo (TCP)
+  - 13336     # h3 echo (UDP)
+  - 18080     # HTTP echo (TCP)
+  - 18443     # TLS echo (TCP)
+  - 13337     # bench 短连接 echo (TCP)
+  - 13338     # stream 长连接 echo (TCP)
+
 build:
   command: "go build -o local-echo ."
 lifecycle:

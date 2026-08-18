@@ -14,7 +14,6 @@ from typing import Any
 
 from .config import (
     LevelConfig,
-    PluginRef,
     ProjectConfig,
     ProjectResult,
     ResourceSnapshot,
@@ -489,69 +488,27 @@ def run_project(
     if not no_build and cfg.settings.build_command:
         _run_build(cfg.settings.build_command, work_dir)
 
-    # ── 插件生命周期（project 级别，跨 suites 复用）──
-    plugin_procs: list[tuple[Any, Any]] = []
+    # 确定要执行的层级
+    target_levels = [l for l in levels if l in cfg.levels] if levels else [
+        name for name, lc in cfg.levels.items() if lc.suites
+    ]
+
+    # ── 插件生命周期（project 级，每 suite 前自检自愈）──
+    # 环境被外部破坏（插件被误杀/端口被残留进程抢占）时：
+    # 先尝试自动恢复；恢复失败 fast fail 并输出测试环境规范，
+    # 避免在残缺环境上继续跑测试导致结果误判。
+    plugin_mgr: Any = None
     if cfg.plugins:
-        try:
-            from .plugin import (
-                discover_plugins,
-                parse_plugin_config,
-                build_plugin,
-                start_plugin,
-                stop_plugin,
-                check_port_conflicts,
-                _find_zigtester_root,
-                PluginConfig,
-            )
-            zt_root = _find_zigtester_root()
-            if zt_root is not None:
-                available = discover_plugins(zt_root)
-                # 第一遍：解析所有插件配置（不启动），用于端口冲突预检
-                all_parsed: list[tuple[PluginRef, PluginConfig]] = []
-                for plugin_ref in cfg.plugins:
-                    if plugin_ref.name not in available:
-                        continue
-                    pcfg = parse_plugin_config(available[plugin_ref.name])
-                    if pcfg is None:
-                        continue
-                    # 合并项目级插件配置覆盖
-                    if plugin_ref.config:
-                        pcfg.config.update(plugin_ref.config)
-                    all_parsed.append((plugin_ref, pcfg))
+        from .plugin import PluginManager
 
-                # 端口冲突预检（跨插件 + 系统占用）
-                try:
-                    from .plugin import check_port_conflicts
-                    pcfgs = [pcfg for _, pcfg in all_parsed]
-                    conflicts = check_port_conflicts(pcfgs)
-                    if conflicts:
-                        print(
-                            f"[run] plugin port conflicts detected ({len(conflicts)}):",
-                            file=sys.stderr,
-                        )
-                        for msg in conflicts:
-                            print(f"[run]   - {msg}", file=sys.stderr)
-                        # 冲突时不启动任何插件，避免半启动状态
-                        return result
-                except Exception as e:
-                    # 端口检测异常不应阻止测试（best-effort）
-                    print(f"[run] port conflict check error: {e}", file=sys.stderr)
-
-                # 第二遍：实际启动插件
-                for _, pcfg in all_parsed:
-                    build_plugin(pcfg)
-                    proc = start_plugin(pcfg, pcfg.path)
-                    if proc is not None:
-                        plugin_procs.append((pcfg, proc))
-        except Exception:
-            pass
+        plugin_mgr = PluginManager()
+        fatal = plugin_mgr.prepare(cfg.plugins)
+        if fatal is not None:
+            print(fatal, file=sys.stderr)
+            _abort_with_env_error(result, cfg, target_levels, fatal)
+            return result
 
     try:
-        # 确定要执行的层级
-        target_levels = [l for l in levels if l in cfg.levels] if levels else [
-            name for name, lc in cfg.levels.items() if lc.suites
-        ]
-
         resolver = DependencyResolver()
         executor = TestExecutor()
 
@@ -573,6 +530,25 @@ def run_project(
                 ordered = filtered
 
             for suite in ordered:
+                # pre-flight：每个套件执行前自检插件环境（无插件时零开销）
+                if plugin_mgr is not None:
+                    fatal = plugin_mgr.ensure_ready()
+                    if fatal is not None:
+                        print(fatal, file=sys.stderr)
+                        err = SuiteResult(
+                            suite_name=suite.name,
+                            level=level_name,
+                            status="ERROR",
+                            message="环境自检失败（自动恢复未成功）— 见下方测试环境规范",
+                            setup_error=fatal,
+                        )
+                        result.suites.append(err)
+                        _skip_remaining_suites(
+                            result, cfg, target_levels, level_name, suite.name
+                        )
+                        result.finished_at = time.time()
+                        return result
+
                 suite_result = executor.execute(suite, work_dir)
                 suite_result.level = level_name
                 result.suites.append(suite_result)
@@ -594,12 +570,72 @@ def run_project(
         return result
     finally:
         # ── 停止插件（reverse order，finally 保证）──
-        for pcfg, proc in reversed(plugin_procs):
-            try:
-                from .plugin import stop_plugin
-                stop_plugin(proc, pcfg)
-            except Exception:
-                pass
+        if plugin_mgr is not None:
+            plugin_mgr.stop_all()
+
+
+def _abort_with_env_error(
+    result: ProjectResult,
+    cfg: ProjectConfig,
+    target_levels: list[str],
+    fatal: str,
+) -> None:
+    """环境致命错误 — 首个套件 ERROR + 其余全部 SKIP，禁止在残缺环境上跑测试。"""
+    first = True
+    for level_name in target_levels:
+        level_cfg = cfg.levels.get(level_name)
+        if level_cfg is None or not level_cfg.suites:
+            continue
+        for suite in level_cfg.suites:
+            if first:
+                result.suites.append(
+                    SuiteResult(
+                        suite_name=suite.name,
+                        level=level_name,
+                        status="ERROR",
+                        message="测试环境自检失败（自动恢复未成功）— 见测试环境规范",
+                        setup_error=fatal,
+                    )
+                )
+                first = False
+            else:
+                result.suites.append(
+                    SuiteResult(
+                        suite_name=suite.name,
+                        level=level_name,
+                        status="SKIP",
+                        message="环境自检失败: 跳过（环境未恢复）",
+                    )
+                )
+    result.finished_at = time.time()
+
+
+def _skip_remaining_suites(
+    result: ProjectResult,
+    cfg: ProjectConfig,
+    target_levels: list[str],
+    failed_level: str,
+    failed_suite: str,
+) -> None:
+    """某套件环境自检失败后 — 同层级剩余套件 + 后续层级全部 SKIP。"""
+    started = False
+    for level_name in target_levels:
+        level_cfg = cfg.levels.get(level_name)
+        if level_cfg is None or not level_cfg.suites:
+            continue
+        for suite in level_cfg.suites:
+            if level_name == failed_level and suite.name == failed_suite:
+                started = True
+                continue
+            if started:
+                result.suites.append(
+                    SuiteResult(
+                        suite_name=suite.name,
+                        level=level_name,
+                        status="SKIP",
+                        message="环境自检失败: 跳过（环境未恢复）",
+                    )
+                )
 
 
 def run_workspace(
@@ -626,30 +662,77 @@ def run_workspace(
     ws = WorkspaceResult()
 
     if not parallel or len(projects) <= 1:
-        # 串行路径（保持现有逻辑不变）
-        for proj in projects:
+        # 串行路径（单项目或未开并行；分组对单项目无意义）
+        if parallel and len(projects) <= 1:
+            print("[run] 仅 1 个项目，无需分组并行，直接串行执行", file=sys.stderr)
+        _run_serial(projects, levels, ws, fail_fast=fail_fast, no_build=no_build)
+        return ws
+
+    # 分组并行：插件端口全局唯一（local-echo:13333 等），声明插件的项目
+    # 并行启动会互相把对方的插件进程识别为"可识别残留"清理掉，导致环境
+    # 互杀、结果误判。因此按是否声明插件分两组：
+    #   1) 无插件组 — ThreadPoolExecutor 并行（各项目工作目录/子进程独立）
+    #   2) 有插件组 — 顺序串行（各自 run_project 内部管理插件启停）
+    # 执行顺序：先无插件并行组，再有插件串行组。
+    no_plugin = [p for p in projects if not p.config.plugins]
+    with_plugin = [p for p in projects if p.config.plugins]
+    if with_plugin and not no_plugin:
+        print(
+            "[run] 全部项目声明测试插件 ("
+            + ", ".join(p.name for p in with_plugin)
+            + ") — 插件端口全局唯一，插件项目串行执行",
+            file=sys.stderr,
+        )
+
+    aborted = False
+    if no_plugin:
+        # 并行组 — 结果按传入顺序输出（不受完成先后影响）
+        with ThreadPoolExecutor(max_workers=len(no_plugin)) as ex:
+            futures = {ex.submit(run_project, p, levels, fail_fast, no_build): p
+                       for p in no_plugin}
+            if fail_fast:
+                # 任一 FAIL → cancel 其余
+                for f in as_completed(futures):
+                    try:
+                        pr = f.result()
+                    except Exception:
+                        continue
+                    if any(s.status == "FAIL" for s in pr.suites):
+                        for remaining in futures:
+                            remaining.cancel()
+                        aborted = True
+                        break
+        for p in no_plugin:  # 按原顺序收集结果
+            f = next(f for f in futures if futures[f] is p)
+            try:
+                ws.projects.append(f.result())
+            except Exception:
+                continue
+
+    if not aborted and with_plugin:
+        # 串行组 — FAIL 即停止（fail_fast）
+        for proj in with_plugin:
             pr = run_project(proj, levels, fail_fast=fail_fast, no_build=no_build)
             ws.projects.append(pr)
             if fail_fast and any(s.status == "FAIL" for s in pr.suites):
                 break
-    else:
-        # 并行路径 — 各项目工作目录、子进程、历史存储互相独立
-        with ThreadPoolExecutor(max_workers=len(projects)) as ex:
-            futures = {
-                ex.submit(run_project, p, levels, fail_fast, no_build): p
-                for p in projects
-            }
-            for f in as_completed(futures):
-                try:
-                    pr = f.result()
-                except Exception:
-                    continue
-                ws.projects.append(pr)
-                if fail_fast and any(s.status == "FAIL" for s in pr.suites):
-                    for remaining in futures:
-                        remaining.cancel()
 
     return ws
+
+
+def _run_serial(
+    projects: list[DiscoveredProject],
+    levels: list[str],
+    ws: "WorkspaceResult",
+    fail_fast: bool = False,
+    no_build: bool = False,
+) -> None:
+    """全部项目串行执行，结果按传入顺序追加到 ws。"""
+    for proj in projects:
+        pr = run_project(proj, levels, fail_fast=fail_fast, no_build=no_build)
+        ws.projects.append(pr)
+        if fail_fast and any(s.status == "FAIL" for s in pr.suites):
+            break
 
 
 _SUDO_FAILURE_PATTERNS = [

@@ -38,6 +38,12 @@ import requests
 
 logger = logging.getLogger("singbox")
 
+# 本地 API 会话 — trust_env=False 绕过 HTTP_PROXY/http_proxy 等环境变量。
+# 否则对 127.0.0.1 的请求会被代理劫持（代理无法回环到本机的 zigtester 端口），
+# 导致 health check 假失败、插件被误判为启动失败。
+_http = requests.Session()
+_http.trust_env = False
+
 # ============================================================================
 # 常量
 # ============================================================================
@@ -245,7 +251,7 @@ class SingboxController:
         注意: 需要传完整配置，不是 patch —— API 不接受增量更新。
         """
         try:
-            r = requests.put(
+            r = _http.put(
                 f"{self.api_url}/configs",
                 json=config,
                 timeout=10,
@@ -386,7 +392,7 @@ class SingboxController:
     def _check_api(self) -> bool:
         """GET /version 验证 API 可访问。"""
         try:
-            r = requests.get(f"{self.api_url}/version", timeout=3)
+            r = _http.get(f"{self.api_url}/version", timeout=3)
             return r.status_code == 200
         except requests.RequestException:
             return False
