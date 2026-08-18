@@ -364,3 +364,8 @@
   - bench :13337（短连接压测，10ms idle 主动关——grpc 死锁解除）+ stream :13338（长连接压测，无 idle——N:1 轮转空隙误杀实证，findings zo §28.14）
 - **原则落地：各项目不再直接操作 echo-server**——zigbox/zigproxy/zigdns/zo 的测试脚本由自启动改为 detect-and-error（未运行提示 zigtester run），echo 生命周期统一由插件常驻管理
 - 验证：zo functional+performance 28/28 全绿
+
+## 2026-08-19: sing-box 插件 Windows 编码修复
+
+- plugins/sing-box/singbox_ctl.py：裸 open() 用 locale 编码（Windows cp1252）读含 UTF-8 中文注释的 test_server.json → UnicodeDecodeError → 插件启不动。补 encoding="utf-8"（两处）。commit 0b25d96
+- 背景：zigbox windowsvm 实机回归首跑发现。另：框架 Windows 侧遗留 pkill//tmp POSIX 假设登记 zigbox #63
