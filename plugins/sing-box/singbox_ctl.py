@@ -270,7 +270,7 @@ class SingboxController:
 
     def reload_file(self, config_path: str) -> bool:
         """从文件加载配置并热重载。支持 sing-box JSONC 格式（含 // 注释）。"""
-        with open(config_path, "r") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             raw = f.read()
         # 去除 // 行注释（sing-box JSONC 格式）
         cleaned = re.sub(r'//.*$', '', raw, flags=re.MULTILINE)
@@ -432,7 +432,7 @@ def _serve(args: argparse.Namespace) -> int:
         return 1
 
     logger.info("[sing-box] %d inbounds ready on %s",
-                len(json.loads(re.sub(r'//.*$', '', open(server_config).read(), flags=re.MULTILINE)).get('inbounds', [])),
+                len(json.loads(re.sub(r'//.*$', '', open(server_config, encoding="utf-8").read(), flags=re.MULTILINE)).get('inbounds', [])),
                 args.api_listen)
 
     # 阻塞等待停止信号
