@@ -234,6 +234,59 @@ def test_verify_healthy() -> None:
         ctx.cleanup()
 
 
+def test_plugin_pipe_drained() -> None:
+    """插件大量 stdout 输出不应阻塞启动 — PIPE 由排空线程落到 /tmp 日志。"""
+    ctx = _Ctx()
+    try:
+        from zigtester.plugin import parse_plugin_config
+        # chatty 变体：bind 前先向 stdout 写 ~200KB（超过 macOS 管道缓冲 64KB）
+        with open(
+            os.path.join(ctx.plugdir, "mini_srv.py"), "w", encoding="utf-8"
+        ) as f:
+            f.write(
+                "import socket, sys\n"
+                "port = int(sys.argv[1])\n"
+                "for i in range(10000):\n"
+                "    print('chatty line %d' % i, flush=True)\n"
+                "s = socket.socket()\n"
+                "s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
+                "s.bind(('127.0.0.1', port))\n"
+                "s.listen(4)\n"
+                "while True:\n"
+                "    c, _ = s.accept()\n"
+                "    c.close()\n"
+            )
+        pcfg = parse_plugin_config(ctx.plugdir)
+        assert pcfg is not None
+        t0 = time.time()
+        proc = start_plugin(pcfg, pcfg.path)
+        elapsed = time.time() - t0
+        assert proc is not None, "chatty 插件启动失败（可能管道阻塞导致 ready 超时）"
+        assert elapsed < 10, f"start_plugin 阻塞过久: {elapsed:.1f}s"
+        try:
+            problems = verify_plugin(pcfg, proc)
+            assert problems == [], f"排空后插件应健康，实际: {problems}"
+            log_path = f"/tmp/zigtester-plugin-{pcfg.name}.log"
+            assert os.path.exists(log_path), f"插件日志未生成: {log_path}"
+            # 等排空线程追平（进程长驻，全部 10000 行应写入日志）
+            deadline = time.time() + 5
+            lines = 0
+            while time.time() < deadline:
+                with open(log_path, encoding="utf-8", errors="replace") as lf:
+                    lines = sum(1 for _ in lf)
+                if lines >= 10000:
+                    break
+                time.sleep(0.2)
+            assert lines >= 10000, (
+                f"插件日志应含 10000 行（PIPE 已排空），实际 {lines} 行"
+            )
+        finally:
+            proc.terminate()
+            proc.wait()
+    finally:
+        ctx.cleanup()
+
+
 def test_verify_dead_process() -> None:
     """进程退出：verify 报告进程已退出。"""
     ctx = _Ctx()
@@ -532,6 +585,7 @@ def main() -> int:
         ("进程树收集 _descendant_pids", test_descendant_pids),
         ("端口归属映射 _port_owner_map", test_port_owner_map_contains_listener),
         ("verify — 健康插件", test_verify_healthy),
+        ("插件 PIPE 排空 — 大量输出不阻塞", test_plugin_pipe_drained),
         ("verify — 进程退出", test_verify_dead_process),
         ("verify — 外部进程抢端口", test_verify_foreign_port_owner),
         ("自愈 — 插件被杀后自动恢复", test_ensure_ready_heals_dead_plugin),

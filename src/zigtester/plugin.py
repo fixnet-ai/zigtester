@@ -10,6 +10,7 @@ import os
 import shlex
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -211,7 +212,7 @@ def start_plugin(
 
     hook = plugin.lifecycle.start
     try:
-        proc = _start_plugin_process(hook, work_dir, plugin.config)
+        proc = _start_plugin_process(hook, work_dir, plugin.config, plugin.name)
 
         # 等待就绪
         ro = hook.ready_on
@@ -247,7 +248,7 @@ def stop_plugin(
     # 1) 执行 stop 命令
     if stop_hook.command is not None:
         try:
-            sp = _start_plugin_process(stop_hook, plugin.path)
+            sp = _start_plugin_process(stop_hook, plugin.path, None, plugin.name)
             try:
                 sp.wait(timeout=stop_hook.timeout)
             except subprocess.TimeoutExpired:
@@ -278,12 +279,24 @@ def stop_plugin(
                 pass
 
 
+def plugin_log_path(plugin_name: str) -> str:
+    """插件 stdout/stderr 排空日志路径。"""
+    return f"/tmp/zigtester-plugin-{plugin_name}.log"
+
+
 def _start_plugin_process(
-    hook: LifecycleHook, work_dir: str, plugin_config: dict[str, Any] | None = None
+    hook: LifecycleHook,
+    work_dir: str,
+    plugin_config: dict[str, Any] | None = None,
+    plugin_name: str = "plugin",
 ) -> subprocess.Popen:
     """启动插件钩子命令（shell 模式）。
 
     插件配置通过 PLUGIN_<KEY> 环境变量注入进程。
+
+    stdout/stderr 均为 PIPE 且立即由 daemon 线程逐行排空到
+    /tmp/zigtester-plugin-<插件名>.log — 否则子进程输出写满 OS 管道
+    缓冲（macOS ~64KB）后会阻塞在 write 上，插件假死。
     """
     assert hook.command is not None
     merged_env = dict(os.environ)
@@ -291,7 +304,7 @@ def _start_plugin_process(
         for key, value in plugin_config.items():
             env_key = f"PLUGIN_{key.upper()}"
             merged_env[env_key] = str(value)
-    return subprocess.Popen(
+    proc = subprocess.Popen(
         hook.command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -299,6 +312,21 @@ def _start_plugin_process(
         cwd=work_dir,
         shell=True,
     )
+    # 排空线程：逐行写入日志文件（"w" truncate，同插件重复启动覆盖）
+    logf = open(plugin_log_path(plugin_name), "wb")
+
+    def _drain(stream) -> None:
+        try:
+            for line in stream:
+                logf.write(line)
+                logf.flush()
+        except (ValueError, OSError):
+            pass
+
+    for pipe in (proc.stdout, proc.stderr):
+        if pipe is not None:
+            threading.Thread(target=_drain, args=(pipe,), daemon=True).start()
+    return proc
 
 
 def _kill_plugin_process(
@@ -627,6 +655,7 @@ def env_spec_message(problems: list[str], plugins: list[PluginConfig]) -> str:
         "2. 所有测试必须经 zigtester 执行：zigtester run <project> 或 MCP zigtester_run（不要直接运行项目测试脚本 python3 tests/...，脚本只探测依赖不负责启动）",
         "3. 环境被破坏时不要手工修复 — 重新执行 zigtester run 即可，zigtester 会自动清理可识别的残留并恢复环境",
         f"排查: lsof -nP -iTCP -iUDP | grep -E '{port_hint}' ; ps aux | grep -E 'local-echo|sing-box|xray'",
+        f"插件日志: {', '.join(plugin_log_path(pl.name) for pl in plugins)}",
         "======================================",
     ]
     return "\n".join(lines)
