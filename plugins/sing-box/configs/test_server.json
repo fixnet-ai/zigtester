@@ -48,6 +48,7 @@
 //                        127.0.0.1:13333 回显, 供传输层真理源验证; ss 叠加形态按需另配)
 //   :16810 shadowtls   — ShadowTLS v3 + SS 叠加 (cover 同上; 解壳后 route→ss-in :8388 解密,
 //                        客户端形态 = ss outbound + shadowtls transport)
+//   :16811 anytls      — AnyTLS (TLS + session mux; 默认 padding scheme)
 
 {
   "log": {
@@ -328,6 +329,23 @@
         "server_port": 18443
       },
       "strict_mode": true
+    },
+    {
+      "type": "anytls",
+      "tag": "anytls-in",
+      "listen": "::",
+      "listen_port": 16811,
+      "users": [
+        {
+          "name": "test-user",
+          "password": "anytls-password"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "certs/localhost.crt",
+        "key_path": "certs/localhost.key"
+      }
     }
   ],
 
