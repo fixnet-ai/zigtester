@@ -44,6 +44,10 @@
 //   :16806 trojan+ws   — Trojan (TLS+WebSocket)
 //   :16807 vless+grpc  — VLESS (TLS+gRPC)
 //   :16808 trojan+grpc — Trojan (TLS+gRPC)
+//   :16809 shadowtls   — ShadowTLS v3 (cover = local-echo TLS :18443; 解壳后 route override→
+//                        127.0.0.1:13333 回显, 供传输层真理源验证; ss 叠加形态按需另配)
+//   :16810 shadowtls   — ShadowTLS v3 + SS 叠加 (cover 同上; 解壳后 route→ss-in :8388 解密,
+//                        客户端形态 = ss outbound + shadowtls transport)
 
 {
   "log": {
@@ -288,6 +292,42 @@
         "type": "grpc",
         "service_name": "trojan-grpc"
       }
+    },
+    {
+      "type": "shadowtls",
+      "tag": "shadowtls-in",
+      "listen": "::",
+      "listen_port": 16809,
+      "version": 3,
+      "users": [
+        {
+          "name": "test-user",
+          "password": "shadowtls-password"
+        }
+      ],
+      "handshake": {
+        "server": "127.0.0.1",
+        "server_port": 18443
+      },
+      "strict_mode": true
+    },
+    {
+      "type": "shadowtls",
+      "tag": "shadowtls-ss-in",
+      "listen": "::",
+      "listen_port": 16810,
+      "version": 3,
+      "users": [
+        {
+          "name": "test-user",
+          "password": "shadowtls-password"
+        }
+      ],
+      "handshake": {
+        "server": "127.0.0.1",
+        "server_port": 18443
+      },
+      "strict_mode": true
     }
   ],
 
@@ -303,5 +343,23 @@
       "type": "direct",
       "tag": "direct-out"
     }
-  ]
+  ],
+
+  "route": {
+    "rules": [
+      {
+        "inbound": ["shadowtls-in"],
+        "outbound": "direct-out",
+        "override_address": "127.0.0.1",
+        "override_port": 13333
+      },
+      {
+        "inbound": ["shadowtls-ss-in"],
+        "outbound": "direct-out",
+        "override_address": "127.0.0.1",
+        "override_port": 8388
+      }
+    ],
+    "final": "direct-out"
+  }
 }
