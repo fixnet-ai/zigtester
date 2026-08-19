@@ -369,3 +369,10 @@
 
 - plugins/sing-box/singbox_ctl.py：裸 open() 用 locale 编码（Windows cp1252）读含 UTF-8 中文注释的 test_server.json → UnicodeDecodeError → 插件启不动。补 encoding="utf-8"（两处）。commit 0b25d96
 - 背景：zigbox windowsvm 实机回归首跑发现。另：框架 Windows 侧遗留 pkill//tmp POSIX 假设登记 zigbox #63
+
+## 2026-08-19 (晚): local-echo bench 端口 FIN 行为暴露 zo 潜伏 UAF（跨项目排查记录）
+
+- **事件**：zo bench-tcp-vless 8-19 20:10 起稳定失败（TCP 前 ~75 OK 后 reset/refused/EOF 漂移 + UDP 0/800），最初嫌疑指向 bb48c8c（shadowtls inbound + route 段，时间吻合）
+- **二分结论：bb48c8c 无辜**——去 route 段/去 shadowtls inbound 后仍 FAIL；回退 zo 代码亦 FAIL
+- **真凶链**：local-echo 统一重写（8-17 04:32 bbdf8ac）bench :13337 改为响应后 10ms idle 主动 FIN → srv EOF 时序变化 → zo 半关闭代码 relay/deinit 双 tun.close() 竞态必现（此前旧 echo 从不主动关、8-17 04:31 的 PASS 是旧 echo 最后一轮）。zo 侧已修（tun_relayed 所有权转移，zo commit 7cbc9ae，zo findings §31）
+- **框架启示**：echo 服务连接生命周期语义（谁先 FIN）是下游协议实现的隐式契约——变更后 zo 全量压测首跑即暴露 3 颗同构 UAF 雷（vless 爆、trojan/ss 侥幸）。此类行为变更落地后应主动触发下游项目全量压测回归
