@@ -49,6 +49,8 @@
 //   :16810 shadowtls   — ShadowTLS v3 + SS 叠加 (cover 同上; 解壳后 route→ss-in :8388 解密,
 //                        客户端形态 = ss outbound + shadowtls transport)
 //   :16811 anytls      — AnyTLS (TLS + session mux; 默认 padding scheme)
+//   :16812 vless+reality — VLESS (REALITY + xtls-rprx-vision; handshake = local-echo TLS :18443;
+//                          private IOnE… public qKrVhendtxJFhOconW1F4GeEmKjXuJYZOsVLfkFZTxY)
 
 {
   "log": {
@@ -345,6 +347,32 @@
         "enabled": true,
         "certificate_path": "certs/localhost.crt",
         "key_path": "certs/localhost.key"
+      }
+    },
+    {
+      "type": "vless",
+      "tag": "vless-reality-in",
+      "listen": "::",
+      "listen_port": 16812,
+      "users": [
+        {
+          "name": "test-user",
+          "uuid": "387b71a7-15ce-4ee0-a791-ab5a08aaa9dc",
+          "flow": "xtls-rprx-vision"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "localhost",
+        "reality": {
+          "enabled": true,
+          "handshake": {
+            "server": "127.0.0.1",
+            "server_port": 18443
+          },
+          "private_key": "IOnE23hYqeGgvJeXMpHDBEhVR5If8DFQxzGPu3b0uEc",
+          "short_id": ["0123abcd"]
+        }
       }
     }
   ],

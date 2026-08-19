@@ -17,6 +17,10 @@ config:
   hysteria2_alt_port: 16802
   tuic_port: 16803
   hysteria2_salamander_port: 16804
+  # 阶段 14 reality 对照入站凭证（xray 侧独立，见 plugins/xray-core）
+  reality_private_key: "IOnE23hYqeGgvJeXMpHDBEhVR5If8DFQxzGPu3b0uEc"
+  reality_public_key: "qKrVhendtxJFhOconW1F4GeEmKjXuJYZOsVLfkFZTxY"
+  reality_short_id: "0123abcd"
 
 # 插件监听的端口列表 — 用于 zigtester 跨插件端口冲突检测
 # 与 xray-core 插件的同名端口 +100 错开
@@ -33,6 +37,11 @@ ports:
   - 16803     # tuic
   - 16804     # hysteria2 salamander
   - 16805     # vless-ws
+  - 16806     # vless-grpc
+  - 16809     # shadowtls
+  - 16810     # shadowtls+ss
+  - 16811     # anytls
+  - 16812     # vless+reality
 
 build:
   command: "sing-box version"
