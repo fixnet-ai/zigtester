@@ -10,6 +10,7 @@ ports:
   - 13336     # h3 echo (UDP)
   - 18080     # HTTP echo (TCP)
   - 18443     # TLS echo (TCP)
+  - 18444     # reality steal dest TLS echo (TCP, 不受信证书)
   - 13337     # bench 短连接 echo (TCP)
   - 13338     # stream 长连接 echo (TCP)
 
@@ -17,7 +18,7 @@ build:
   command: "go build -o local-echo ."
 lifecycle:
   start:
-    command: "exec ./local-echo --tcp-port 13333 --dns-port 5533 --h2-port 13335 --h3-port 13336 --http-port 18080 --tls-port 18443 --real-dns-port 15353 --bench-port 13337 --stream-port 13338 --cert certs/localhost.crt --key certs/localhost.key"
+    command: "exec ./local-echo --tcp-port 13333 --dns-port 5533 --h2-port 13335 --h3-port 13336 --http-port 18080 --tls-port 18443 --reality-tls-port 18444 --real-dns-port 15353 --bench-port 13337 --stream-port 13338 --cert certs/localhost.crt --key certs/localhost.key"
     timeout: 10
     ready_on:
       type: tcp

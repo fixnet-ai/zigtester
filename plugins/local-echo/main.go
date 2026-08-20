@@ -516,6 +516,9 @@ func main() {
 	keyPath := flag.String("key", "certs/localhost.key", "TLS key")
 	httpPort := flag.Int("http-port", 0, "extra protocol-adaptive echo port (0=off; zigbox matrix curl target 18080)")
 	tlsPort := flag.Int("tls-port", 0, "extra TLS echo port (0=off; SNI sniff scenario 18443)")
+	realityTlsPort := flag.Int("reality-tls-port", 0, "extra TLS echo port with UNTRUSTED cert (0=off; xray reality steal dest 18444)")
+	realityCertPath := flag.String("reality-cert", "certs/reality-untrusted.crt", "untrusted TLS certificate for reality steal dest")
+	realityKeyPath := flag.String("reality-key", "certs/reality-untrusted.key", "untrusted TLS key for reality steal dest")
 	realDnsPort := flag.Int("real-dns-port", 0, "secondary DNS port with real-map semantics (0=off; zigbox matrix 15353)")
 	benchPort := flag.Int("bench-port", 0, "short-conn bench echo port, 10ms idle close (0=off; bench-tcp 13337)")
 	streamPort := flag.Int("stream-port", 0, "long-conn stream echo port, no idle close (0=off; bench-stream 13338)")
@@ -561,6 +564,23 @@ func main() {
 		}
 		go serveTcpEcho(tlsLn, "tls-echo")
 		fmt.Printf("TLS_ECHO=0.0.0.0:%d\n", *tlsPort)
+	}
+
+	// ---- reality steal 目标(不受信证书;xray reality 服务端探针/镜像用)----
+	// xray reality 服务端启动时会用 utls 客户端探测 dest 的 post-handshake 记录长度;
+	// 若 dest 证书受系统信任,探测握手成功 → 5s ReadAll 路径 → 锻造循环轮询阻塞早到连接。
+	// 不受信证书使探测快速失败 → GlobalPostHandshakeRecordsLens 立即 []int{} → 无延迟。
+	if *realityTlsPort > 0 {
+		rtCert, err := tls.LoadX509KeyPair(*realityCertPath, *realityKeyPath)
+		if err != nil {
+			log.Fatalf("reality tls echo load cert: %v", err)
+		}
+		rtLn, err := tls.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", *realityTlsPort), &tls.Config{Certificates: []tls.Certificate{rtCert}})
+		if err != nil {
+			log.Fatalf("reality tls echo listen: %v", err)
+		}
+		go serveTcpEcho(rtLn, "reality-tls-echo")
+		fmt.Printf("REALITY_TLS_ECHO=0.0.0.0:%d\n", *realityTlsPort)
 	}
 
 	// ---- bench echo(纯字节,短连接压测;零协议检测 + 10ms 空闲主动关)----

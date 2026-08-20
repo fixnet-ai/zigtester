@@ -26,7 +26,6 @@ config:
   # 私钥通过 `xray x25519` 生成；公钥保留供客户端出站配置参考
   reality_public_key: "AS8ujQIlI5iRKq-rTQ-XJEhm6TldzVKo-GxENr6dMH8"
   reality_private_key: "YG2cUEJNf-tdCVG1L6VgsUUHwIPMR1swgeMgFnZoGXM"
-  reality_dest: "127.0.0.1:18443"
   reality_server_names: "localhost,127.0.0.1"
 
 # 插件监听的端口列表 — 用于 zigtester 跨插件端口冲突检测

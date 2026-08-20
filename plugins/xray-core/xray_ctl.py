@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -38,7 +39,23 @@ logger = logging.getLogger("xray")
 # 常量
 # ============================================================================
 
-XRAY_BIN = "xray"
+def _resolve_bin(name: str, candidates: list[str]) -> str:
+    """解析二进制绝对路径，摆脱对 PATH 的依赖。
+
+    zigtester 插件子进程继承 MCP server 的 launchd 最小 PATH（/usr/bin:/bin:...），
+    不含 /opt/homebrew/bin 与 /usr/local/bin，Popen([name]) 会 FileNotFoundError。
+    先 shutil.which，再回退到常见绝对路径；都找不到则保留原名，让错误清晰暴露。
+    """
+    found = shutil.which(name)
+    if found:
+        return found
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    return name
+
+
+XRAY_BIN = _resolve_bin("xray", ["/usr/local/bin/xray", "/opt/homebrew/bin/xray"])
 DEFAULT_READINESS_PORT = 9190          # 与 plugin.yaml ready_on.port 一致
 DEFAULT_START_TIMEOUT = 15.0           # 与 plugin.yaml lifecycle.start.timeout 一致
 
@@ -325,6 +342,19 @@ class XrayController:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
+            # 排空 xray-core stdout/stderr 到插件日志（无人读管道会满 → xray 阻塞；
+            # reality show:true 调试输出也依赖此路径可见）
+            def _drain(pipe: object, tag: str) -> None:
+                assert self._proc is not None
+                for line in pipe:
+                    logger.info("[xray-core %s] %s", tag, line.rstrip())
+
+            self._drain_threads = [
+                threading.Thread(target=_drain, args=(self._proc.stdout, "out"), daemon=True),
+                threading.Thread(target=_drain, args=(self._proc.stderr, "err"), daemon=True),
+            ]
+            for t in self._drain_threads:
+                t.start()
         except FileNotFoundError:
             logger.error(
                 "[%s] xray binary not found. Install: "
