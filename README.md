@@ -171,7 +171,15 @@ levels:
 ## MCP Server Deployment
 
 ```bash
-# Start (long-running daemon; stateless JSON-RPC, no SSE/session overhead)
+# Recommended: install as auto-start service (macOS launchd; survives reboot,
+# auto-restarts on crash)
+zigtester install --dir ~/projects
+
+# Check / remove
+zigtester status
+zigtester uninstall
+
+# Manual start (long-running daemon; stateless JSON-RPC, no SSE/session overhead)
 ZIGTESTER_ROOT=~/projects python -m zigtester.server &
 
 # Any MCP client config (Claude Code, VS Code, etc.):
@@ -182,6 +190,9 @@ ZIGTESTER_ROOT=~/projects python -m zigtester.server &
   }
 }
 ```
+
+> `zigtester install` currently supports macOS only (launchd). On other platforms
+> start the server manually, or manage it with your platform's service manager.
 
 The MCP Server exposes 5 tools: `zigtester_scan`, `zigtester_list`, `zigtester_run`, `zigtester_history`, `zigtester_init`. Your AI coding agent calls them automatically — you just describe what you want in natural language.
 

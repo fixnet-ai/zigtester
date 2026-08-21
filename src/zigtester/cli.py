@@ -1,6 +1,6 @@
 """CLI 入口 — argparse 子命令。
 
-命令: zigtester scan|run|list|history|init
+命令: zigtester scan|run|list|history|init|install|uninstall|status
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ import argparse
 import os
 import sys
 
+from .autostart import cmd_install, cmd_status, cmd_uninstall
 from .config import VALID_LEVELS
 from .history import check_regression, load_history
 from .reporter import Reporter
@@ -274,6 +275,16 @@ def main() -> None:
                         choices=["terminal", "markdown", "json"],
                         help="输出格式（默认 terminal）")
 
+    # ── install ────────────────────────────────────────────
+    p_install = sub.add_parser("install", help="安装自启动（macOS launchd）")
+    p_install.add_argument("--dir", help="服务工作目录（默认 ZIGTESTER_ROOT 或当前目录）")
+
+    # ── uninstall ──────────────────────────────────────────
+    p_uninstall = sub.add_parser("uninstall", help="卸载自启动")
+
+    # ── status ─────────────────────────────────────────────
+    p_status = sub.add_parser("status", help="查看自启动状态")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -286,6 +297,9 @@ def main() -> None:
         "run": cmd_run,
         "history": cmd_history,
         "init": cmd_init,
+        "install": cmd_install,
+        "uninstall": cmd_uninstall,
+        "status": cmd_status,
     }
 
     handler = handlers.get(args.command)
