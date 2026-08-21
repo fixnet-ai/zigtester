@@ -1,11 +1,6 @@
 # CLAUDE.md
 
-> **通用规则（日志规范、Zig 0.16.0、唯一实现源、行为准则、代码编写规范、调试铁律等）**
-> 已在用户级 `~/.claude/CLAUDE.md` 中统一定义，本项目不再重复。
->
-> **⚠️ `error.Unexpected` 致命错误**：开发测试阶段，`error.Unexpected`（或语义等价的意外状态错误）必须视为致命错误立即 panic，严禁静默吞掉。完整规则见用户级 CLAUDE.md § 调试铁律 #5。
->
-> 本文件仅包含 zigtester 项目特有信息。
+> 通用规则见用户级 `~/.claude/CLAUDE.md`；本文件仅含 zigtester 项目特有信息。
 
 ## 项目概述
 
@@ -34,11 +29,11 @@ fixnet/
 5. **历史追踪** — 自动保存每次运行结果，支持性能回归检测（当前 vs 历史移动平均）
 6. **双层入口** — MCP Server（Claude Code 调用，服务端解析，节省 token）+ CLI（人类终端/CI）
 7. **插件管理** — 自动发现、构建、启动/停止测试依赖插件（echo server、sing-box 等），通过 `plugin.yaml` 声明生命周期
-8. **环境自检自愈**（2026-08-18）— 每个测试套件执行前 pre-flight 自检插件环境（进程存活 + readiness 端口 + **端口归属进程树校验**，lsof + ps 实现）；被外部破坏（兄弟项目会话误杀/残留进程抢端口）时自动清理恢复（仅清理可识别的插件残留，未知进程不误杀）；恢复失败 fast fail 并输出「测试环境规范」指引 AI agent 经 zigtester 运行。见 `plugin.py` `PluginManager` / `verify_plugin` / `env_spec_message`，单测 `tests/test_env_guard.py`
+8. **环境自检自愈** — 每个测试套件执行前 pre-flight 自检插件环境（进程存活 + readiness 端口 + **端口归属进程树校验**，lsof + ps 实现）；被外部破坏时自动清理恢复（仅清理可识别的插件残留，未知进程不误杀）；恢复失败 fast fail 并输出「测试环境规范」指引 AI agent 经 zigtester 运行。见 `plugin.py` `PluginManager` / `verify_plugin` / `env_spec_message`，单测 `tests/test_env_guard.py`
 
-### 测试环境治理铁律（生态级，2026-08-18 用户裁定）
+### 测试环境治理铁律（生态级，用户裁定）
 
-**所有 zig* 项目的测试（调试、验证、回归）必须经 zigtester 执行**，各项目 CLAUDE.md 已同步写入铁律：
+**所有 zig* 项目的测试（调试、验证、回归）必须经 zigtester 执行**：
 
 - 兄弟项目测试脚本只探测依赖服务（detect-and-error），绝不自启 echo/sing-box/xray
 - 任何会话禁止手动启停插件进程（`sing-box run` / `xray run` / local-echo 二进制 / `pkill` 插件名）
@@ -200,7 +195,7 @@ levels:
 通过 `plugins/<name>/plugin.yaml` 定义可复用的测试依赖（echo server、sing-box 等），含构建命令、启动/停止生命周期、就绪检测：
 
 ```yaml
-# plugins/local-echo/plugin.yaml（统一 Go 程序，2026-08-17 起替代 Python 版）
+# plugins/local-echo/plugin.yaml（统一 Go 程序）
 name: local-echo
 build:
   command: "go build -o local-echo ."
