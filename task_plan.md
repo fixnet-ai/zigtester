@@ -10,7 +10,31 @@
 
 ## Current Phase
 
-Phase 1-7 ✅ | Phase 8 🔄 | Phase 9 ✅ | Phase 10 ✅ | **Phase 11 ✅（2026-08-18 workflow 并行完成）**
+Phase 1-7 ✅ | Phase 8 🔄 | Phase 9 ✅ | Phase 10 ✅ | Phase 11 ✅（2026-08-18 workflow） | **Phase 12 ✅（2026-08-21 #69-④ 插件 host 化）**
+
+### Phase 12: 插件 host 化（#69-④ 远程插件模式）✅
+> **创建**: 2026-08-21 | **完成**: 2026-08-21（配合 zigbox #69-④ set_system_proxy 三 VM 实测）
+
+**背景**: zigbox 三 VM 实测要求 VM 内不部署 local-echo/sing-box/xray-core，插件服务统一跑 host（本机），
+VM 经可配置服务器 IP（默认 127.0.0.1，VM 场景 = host 网关 IP，如 192.168.64.1）连接。zigtester 侧落地 L1/L2。
+
+#### P12.1 远程插件模式（L1）✅
+- [x] 数据模型：`PluginConfig.host`（plugin.yaml 顶层）+ `PluginRef.host`（zigtester.yaml plugins 条目）
+- [x] 优先级：`plugin_ref.host` > plugin.yaml `host:` > `ZIGTESTER_PLUGIN_HOST` env > `"127.0.0.1"`
+- [x] `_is_local_host` 判定；非本机 host 远程分支：prepare 跳 build/start/cleanup 改远端 ready-on 就绪探测、
+  verify 跳进程存活/端口归属、heal 不重启（仅 re-verify）、stop/stop_all 跳过（不杀远端进程）、
+  port_conflict 跳系统占用段（保留跨插件重复声明）
+- [x] 提交 `500cd7e`（4 文件：src/zigtester/config.py / plugin.py + plugins/local-echo/main.go / plugin.yaml）
+
+#### P12.2 local-echo 绑定地址参数（L2）✅
+- [x] `--host` flag（默认 127.0.0.1；TCP/UDP 全部绑定改 host）+ `--real-dns-answer-ip`（默认 127.0.0.1；
+  real-DNS 应答 IP = echo 出站目标地址，host 侧 VM 服务传 $GW_IP）
+- [x] plugin.yaml start command 显式 `--host 127.0.0.1 --real-dns-answer-ip 127.0.0.1`（本机默认不变）
+
+#### 验证
+- [x] 本机零回归：sysproxy PASS（本地模式）+ 远程 fast-fail 报错正确
+- [x] 三 VM 实测全通过（结果登记在 zigbox task_plan/progress § #69-④）：linuxvm scenarios 20.4s +
+  双身份 sysproxy、windowsvm sysproxy 4.5s、macvm sysproxy 19.0s
 
 ### Phase 11: flaky 根因修复 + 插件管道排空 ✅
 > **创建**: 2026-08-18 | **完成**: 2026-08-18（workflow wf_95e67554-b2a：2 agent，118K tokens / 9.6 分钟）
@@ -321,7 +345,7 @@ Phase 1-7 ✅ | Phase 8 🔄 | Phase 9 ✅ | Phase 10 ✅ | **Phase 11 ✅（202
 | 先 Phase 1（zigbox 试点）而非全覆盖 | zigbox 已有 zigtester.yaml，可直接开始；用试点经验指导后续 |
 | stub skill 保留项目特有操作警告 | TUN 调试警告无法自动化，必须保留人类可读知识 |
 | zigbox-outbound-dev skill 完全删除 | 内容已被 zigbox tests skill 和 zigtester.yaml 覆盖 |
-| 不修改 zig/zig-async 语言技能 | 那是 Zig 语言技能，与测试框架职责正交 |
+| ~~不修改 zig/zig-async 语言技能~~ → 已全局删除 | 语言技能与测试框架职责正交，后因冗余移除（2026-08-20） |
 | 不删除现有测试脚本 | zigtester 是包装层，不是替换层 |
 | **Phase 6 用生命周期钩子替代逐个修补** | 端口冲突、僵尸进程、超时不匹配等 5 个问题根因都是缺少 setup/teardown。逐个修补解决不了架构缺陷 |
 | **UDP 就绪检测不纳入框架** | 这是测试脚本自身职责，框架不应越界 |
@@ -358,7 +382,7 @@ Phase 1-7 ✅ | Phase 8 🔄 | Phase 9 ✅ | Phase 10 ✅ | **Phase 11 ✅（202
 
 - 现有测试脚本（test_protocols.py、test_bench.py 等）
 - create-tester skill（zigtester 自有）
-- zig/zig-async-skill（语言技能）
+- ~~zig/zig-async-skill（语言技能）~~ → 已删除
 
 ### 当前接入状态
 
