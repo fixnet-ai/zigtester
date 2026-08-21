@@ -18,6 +18,34 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 
+
+def _augment_path() -> None:
+    """补齐 PATH——launchd 启动的服务继承最小 PATH（/usr/bin:/bin:...），
+    导致插件/suite 子进程找不到 go/sing-box/xray/homebrew python。
+
+    在 server 启动时把常见二进制目录补到 PATH 头部；runner.py / plugin.py
+    的 `dict(os.environ)` 会原样继承补全后的 PATH。
+    """
+    parts = [p for p in os.environ.get("PATH", "").split(":") if p]
+    extras = [
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "/usr/local/sbin",
+        "/usr/local/go/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ]
+    for extra in extras:
+        if extra and extra not in parts and os.path.isdir(extra):
+            parts.insert(0, extra)
+    os.environ["PATH"] = ":".join(parts)
+
+
+_augment_path()
+
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 9020
 

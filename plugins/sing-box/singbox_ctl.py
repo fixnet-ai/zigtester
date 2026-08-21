@@ -28,27 +28,79 @@ import os
 import platform
 import re
 import select
+import shutil
 import signal
 import subprocess
 import sys
 import time
 from typing import Optional
 
-import requests
+import urllib.error
+import urllib.request
 
 logger = logging.getLogger("singbox")
 
-# 本地 API 会话 — trust_env=False 绕过 HTTP_PROXY/http_proxy 等环境变量。
+
+class _HttpError(Exception):
+    """本地 API 请求失败（连接/超时/协议错误）。"""
+
+
+class _HttpResp:
+    """最小 HTTP 响应对象 — 仅暴露 status_code / text，替代 requests.Response。"""
+
+    def __init__(self, status_code: int, body: bytes):
+        self.status_code = status_code
+        self.text = body.decode("utf-8", errors="replace")
+
+
+# 本地 API opener — ProxyHandler({}) 绕过 HTTP_PROXY/http_proxy 等环境变量。
 # 否则对 127.0.0.1 的请求会被代理劫持（代理无法回环到本机的 zigtester 端口），
 # 导致 health check 假失败、插件被误判为启动失败。
-_http = requests.Session()
-_http.trust_env = False
+# 使用 stdlib urllib 而非 requests——插件子进程的 python3 可能无 requests 依赖。
+_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _http_call(method: str, url: str, *, json_body=None, timeout: float = 10.0) -> _HttpResp:
+    """向本地 sing-box REST API 发请求，返回最小响应对象。
+
+    非 2xx 仍返回响应（调用方按 status 判断）；连接/超时错误抛 _HttpError。
+    """
+    data = None
+    headers = {}
+    if json_body is not None:
+        data = json.dumps(json_body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with _opener.open(req, timeout=timeout) as resp:
+            return _HttpResp(resp.status, resp.read())
+    except urllib.error.HTTPError as e:
+        # 非 2xx：保留状态码与响应体，供调用方按 status 分支
+        return _HttpResp(e.code, e.read() or b"")
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise _HttpError(str(e)) from e
 
 # ============================================================================
 # 常量
 # ============================================================================
 
-SINGBOX_BIN = "sing-box"
+def _resolve_bin(name: str, candidates: list[str]) -> str:
+    """解析二进制绝对路径，摆脱对 PATH 的依赖。
+
+    zigtester 插件子进程继承 MCP server 的 launchd 最小 PATH（/usr/bin:/bin:...），
+    不含 /opt/homebrew/bin 与 /usr/local/bin，Popen([name]) 会 FileNotFoundError。
+    先 shutil.which，再回退到常见绝对路径；都找不到则保留原名，让错误清晰暴露。
+    """
+    found = shutil.which(name)
+    if found:
+        return found
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    return name
+
+
+SINGBOX_BIN = _resolve_bin("sing-box", ["/opt/homebrew/bin/sing-box", "/usr/local/bin/sing-box"])
 DEFAULT_API = "127.0.0.1:9090"
 DEFAULT_READY_TIMEOUT = 15
 IS_MACOS = platform.system() == "Darwin"
@@ -251,11 +303,7 @@ class SingboxController:
         注意: 需要传完整配置，不是 patch —— API 不接受增量更新。
         """
         try:
-            r = _http.put(
-                f"{self.api_url}/configs",
-                json=config,
-                timeout=10,
-            )
+            r = _http_call("PUT", f"{self.api_url}/configs", json_body=config, timeout=10)
             if r.status_code in (200, 204):
                 logger.info(f"[{self._label}] config reloaded: {len(config.get('inbounds',[]))} inbounds, {len(config.get('outbounds',[]))} outbounds")
                 return True
@@ -264,7 +312,7 @@ class SingboxController:
                     f"[{self._label}] config reload failed: HTTP {r.status_code}\n{r.text[:500]}"
                 )
                 return False
-        except requests.RequestException as e:
+        except _HttpError as e:
             logger.error(f"[{self._label}] config reload request failed: {e}")
             return False
 
@@ -392,9 +440,9 @@ class SingboxController:
     def _check_api(self) -> bool:
         """GET /version 验证 API 可访问。"""
         try:
-            r = _http.get(f"{self.api_url}/version", timeout=3)
+            r = _http_call("GET", f"{self.api_url}/version", timeout=3)
             return r.status_code == 200
-        except requests.RequestException:
+        except _HttpError:
             return False
 
 
