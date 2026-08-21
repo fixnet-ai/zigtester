@@ -218,6 +218,14 @@ class MetricExtractor:
             (r"错误:\s*([0-9]+)", "error_count"),
             (r"成功:\s*([0-9]+)", "success_count"),
             (r"总计:\s*([0-9]+)", "total_requests"),
+            # zigoutbounds test_engine.py bench 输出（KEY=VALUE 格式,bench-tcp 行在
+            # bench-udp 行之前,re.search 取首个匹配 = TCP 数据）:
+            (r"LATENCY_MIN_MS=([0-9.]+)", "latency_min_ms"),
+            (r"AVG_MS=([0-9.]+)", "latency_avg_ms"),
+            (r"P50_MS=([0-9.]+)", "latency_p50_ms"),
+            (r"P99_MS=([0-9.]+)", "latency_p99_ms"),
+            (r"THROUGHPUT_MBPS=([0-9.]+)", "throughput_mbps"),
+            (r"REQ_S=([0-9.]+)", "req_s"),
         ]
         for pat, key in patterns:
             m = re.search(pat, stdout)
