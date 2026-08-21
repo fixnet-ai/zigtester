@@ -59,6 +59,15 @@ const httpOkHeaderTpl = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-
 // TCP echo — 协议自适应
 // ═══════════════════════════════════════════════════════════════
 
+// setNoDelay — 显式禁用 Nagle：macOS delayed-ACK(100ms) × Nagle 死锁会让
+// 「对端多段小写 + 本侧等齐再应答」的请求卡 ~100ms（Zig 侧 libxev initFd 同因修复）。
+// Go 对 accepted 连接的默认 NODELAY 因版本而异，显式设置最稳。
+func setNoDelay(conn net.Conn) {
+	if tcp, ok := conn.(*net.TCPConn); ok {
+		tcp.SetNoDelay(true)
+	}
+}
+
 func handleTcp(conn net.Conn) {
 	defer conn.Close()
 	r := readerPool.Get().(*bufio.Reader)
@@ -536,6 +545,7 @@ func main() {
 				log.Printf("[%s] accept: %v", name, err)
 				return
 			}
+			setNoDelay(conn)
 			go handleTcp(conn)
 		}
 	}
@@ -600,6 +610,7 @@ func main() {
 					log.Printf("[bench-echo] accept: %v", err)
 					return
 				}
+				setNoDelay(conn)
 				go handleBench(conn)
 			}
 		}()
@@ -619,6 +630,7 @@ func main() {
 					log.Printf("[stream-echo] accept: %v", err)
 					return
 				}
+				setNoDelay(conn)
 				go handleStream(conn)
 			}
 		}()
