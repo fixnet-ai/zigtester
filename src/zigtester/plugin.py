@@ -45,10 +45,29 @@ class PluginConfig:
     name: str
     description: str = ""
     path: str = ""              # 插件目录绝对路径
+    host: str | None = None     # 插件服务器 IP（None=未配置，运行时 resolve 到
+                                # ZIGTESTER_PLUGIN_HOST/127.0.0.1；非本机 = 远程插件模式：
+                                # 服务已在远端 host 运行，本机不 build/start/stop，只远端探测）
     build: PluginBuild = field(default_factory=PluginBuild)
     lifecycle: PluginLifecycle | None = None
     config: dict[str, Any] = field(default_factory=dict)  # 项目级覆盖配置
     ports: list[int] = field(default_factory=list)        # 插件监听端口（用于跨插件冲突检测）
+
+
+# 视为"本机"的 host 值 — 判定插件服务是否运行在本机（本机 = 本地启动/停止/端口归属）
+_LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1", "0.0.0.0")
+
+
+def _resolve_host(plugin: PluginConfig) -> str:
+    """解析插件生效的服务器 host（优先级：显式配置 > ZIGTESTER_PLUGIN_HOST > 127.0.0.1）。"""
+    if plugin.host:
+        return plugin.host
+    return os.environ.get("ZIGTESTER_PLUGIN_HOST", "127.0.0.1")
+
+
+def _is_local_host(host: str) -> bool:
+    """host 是否指向本机（回环或全接口）。非本机 = 远程插件模式。"""
+    return host in _LOCAL_HOSTS
 
 
 # ── 解析 ────────────────────────────────────────────────────
@@ -68,6 +87,9 @@ def parse_plugin_config(plugin_dir: str) -> PluginConfig | None:
 
     name = str(raw.get("name", os.path.basename(plugin_dir)))
     description = str(raw.get("description", ""))
+    # 插件服务器 host（默认 None → 运行时 resolve 到 ZIGTESTER_PLUGIN_HOST/127.0.0.1；
+    # 非本机 host = 远程插件模式，服务已在远端 host 运行）
+    host = str(raw["host"]) if "host" in raw else None
 
     # 加载插件默认配置（后续可被项目级 zigtester.yaml 覆盖）
     config_raw = raw.get("config")
@@ -97,6 +119,7 @@ def parse_plugin_config(plugin_dir: str) -> PluginConfig | None:
             name=name,
             description=description,
             path=plugin_dir,
+            host=host,
             build=build,
             config=config,
             lifecycle=None,
@@ -123,6 +146,7 @@ def parse_plugin_config(plugin_dir: str) -> PluginConfig | None:
         name=name,
         description=description,
         path=plugin_dir,
+        host=host,
         build=build,
         config=config,
         lifecycle=lifecycle,
@@ -240,6 +264,9 @@ def stop_plugin(
     plugin: PluginConfig,
 ) -> None:
     """停止插件进程 + 进程名清理。"""
+    # 远程插件：服务在远端 host，本机无进程可停；pkill 还会误杀本机同名进程
+    if not _is_local_host(_resolve_host(plugin)):
+        return
     if plugin.lifecycle is None:
         return
 
@@ -390,12 +417,15 @@ def check_port_conflicts(
                 f"port {port} 被多个插件同时声明: {', '.join(names)}"
             )
 
-    # 2) 系统已占用端口检测
+    # 2) 系统已占用端口检测 — 仅本地插件（远程插件端口在远端 host，不占本机）
     for plugin in plugins:
+        phost = _resolve_host(plugin)
+        if not _is_local_host(phost):
+            continue
         for port in plugin.ports:
-            if _port_listening(host, port):
+            if _port_listening(phost, port):
                 conflicts.append(
-                    f"插件 {plugin.name} 声明的端口 {host}:{port} 已被占用（可能是其他 zigtester 插件残留）"
+                    f"插件 {plugin.name} 声明的端口 {phost}:{port} 已被占用（可能是其他 zigtester 插件残留）"
                 )
 
     return conflicts
@@ -484,36 +514,43 @@ def _port_owner_map() -> dict[int, set[int]] | None:
     return owners
 
 
-def verify_plugin(plugin: PluginConfig, proc: subprocess.Popen) -> list[str]:
+def verify_plugin(plugin: PluginConfig, proc: subprocess.Popen | None) -> list[str]:
     """校验插件健康状态。返回问题列表（空 = 健康）。
 
     三层校验：
-      1. 进程存活 — proc 退出即异常
-      2. readiness 端口可连 — ready_on 声明的 TCP 端口
+      1. 进程存活 — proc 退出即异常（仅本地模式；远程模式 proc=None）
+      2. readiness 端口可连 — ready_on 声明的 TCP 端口（远程模式探测远端 host）
       3. 端口归属 — 声明的每个端口，其占用者必须包含本插件进程树成员
-         （防外部进程抢端口；lsof 不可见 + 端口可连 = root 残留进程，同样视为异常）
+         （防外部进程抢端口；lsof 不可见 + 端口可连 = root 残留进程，同样视为异常；
+          仅本地模式，远程端口在远端 host 不适用）
     """
     problems: list[str] = []
+    host = _resolve_host(plugin)
+    local = _is_local_host(host)
 
-    # 1) 进程存活
-    if proc.poll() is not None:
-        problems.append(
-            f"插件 {plugin.name} 进程已退出 (exit={proc.returncode})"
-        )
-        return problems
+    # 1) 进程存活（仅本地模式）
+    if local:
+        if proc is None:
+            problems.append(f"插件 {plugin.name} 本机进程缺失（远程模式误用 verify_plugin）")
+            return problems
+        if proc.poll() is not None:
+            problems.append(
+                f"插件 {plugin.name} 进程已退出 (exit={proc.returncode})"
+            )
+            return problems
 
-    # 2) readiness 端口
+    # 2) readiness 端口 — 探测 host 用插件级 host（远程 = 远端可达性）
     ro = None
     if plugin.lifecycle is not None:
         ro = plugin.lifecycle.start.ready_on
     if ro is not None and ro.type == "tcp" and ro.port:
-        if not _port_listening(ro.host, ro.port):
+        if not _port_listening(host, ro.port):
             problems.append(
-                f"插件 {plugin.name} readiness 端口 {ro.host}:{ro.port} 不可达"
+                f"插件 {plugin.name} readiness 端口 {host}:{ro.port} 不可达"
             )
 
-    # 3) 端口归属（best-effort，lsof 可用时执行）
-    if plugin.ports:
+    # 3) 端口归属（仅本地模式）
+    if local and plugin.ports:
         owner_map = _port_owner_map()
         if owner_map is not None:
             tree = _descendant_pids(proc.pid)
@@ -577,8 +614,11 @@ def _cleanup_stale_processes(plugins: list[PluginConfig], ports: list[int]) -> t
                         f"端口 {port} 被未知进程占用 (PID {pid}: {cmdline[:80]})"
                     )
 
-    # 清理可识别的残留（kill 名单 + 启动命令特征）
+    # 清理可识别的残留（kill 名单 + 启动命令特征）— 仅本地插件；
+    # 远程插件服务在 host，本机 pkill 只会误杀本机同名进程
     for plugin in plugins:
+        if not _is_local_host(_resolve_host(plugin)):
+            continue
         _pkill_names(plugin)
     # 等待端口释放
     deadline = time.time() + 5
@@ -709,6 +749,9 @@ class PluginManager:
                 return f"插件 {plugin_ref.name} 的 plugin.yaml 解析失败"
             if plugin_ref.config:
                 pcfg.config.update(plugin_ref.config)
+            # 项目级 host 覆盖（优先级最高）：zigtester.yaml plugins.<name>.host
+            if plugin_ref.host:
+                pcfg.host = plugin_ref.host
             all_parsed.append((plugin_ref, pcfg))
 
         if not all_parsed:
@@ -736,8 +779,23 @@ class PluginManager:
                     pcfgs,
                 )
 
-        # 启动
+        # 启动（本地）或远端就绪探测（远程）
         for _, pcfg in all_parsed:
+            if not _is_local_host(_resolve_host(pcfg)):
+                # 远程模式：服务已在 host 运行，本机不 build/start，仅就绪探测
+                ro = None
+                if pcfg.lifecycle is not None:
+                    ro = pcfg.lifecycle.start.ready_on
+                if ro is not None and ro.type == "tcp":
+                    phost = _resolve_host(pcfg)
+                    if not _wait_tcp_ready(phost, ro.port, ro.timeout, ro.interval):
+                        self.stop_all()
+                        return env_spec_message(
+                            [f"远端插件 {pcfg.name} 就绪探测失败（{phost}:{ro.port} 不可达）"],
+                            pcfgs,
+                        )
+                self._plugins.append((pcfg, None))
+                continue
             build_plugin(pcfg)
             proc = start_plugin(pcfg, pcfg.path)
             if proc is None:
@@ -768,9 +826,21 @@ class PluginManager:
         return None
 
     def _heal(
-        self, pcfg: PluginConfig, proc: subprocess.Popen
+        self, pcfg: PluginConfig, proc: subprocess.Popen | None
     ) -> tuple[subprocess.Popen | None, list[str]]:
-        """自愈单个插件：停止 + 清残留 + 重启 + 复检。"""
+        """自愈单个插件：停止 + 清残留 + 重启 + 复检。
+
+        远程插件（服务在 host）无法在本机重启 → 仅复检；探测失败即 fast fail
+        （由调用方 ensure_ready 按 remaining 决定是否中止）。
+        """
+        if not _is_local_host(_resolve_host(pcfg)):
+            remaining = verify_plugin(pcfg, None)
+            if remaining:
+                return None, [
+                    f"远端插件 {pcfg.name} 仍不可达: " + "; ".join(remaining)
+                ]
+            return None, []
+
         stop_plugin(proc, pcfg)
         if pcfg.ports:
             deadline = time.time() + 5

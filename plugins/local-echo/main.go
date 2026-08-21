@@ -425,7 +425,7 @@ func buildDnsResponse(packet []byte, query *dnsQuery, ips []net.IP) []byte {
 	return resp
 }
 
-func handleDns(conn *net.UDPConn, upstream string, realMode bool) {
+func handleDns(conn *net.UDPConn, upstream string, realMode bool, realAnswerIP string) {
 	buf := make([]byte, 65535)
 	pending := make(map[uint16]*net.UDPAddr)
 	var mu sync.Mutex
@@ -465,8 +465,10 @@ func handleDns(conn *net.UDPConn, upstream string, realMode bool) {
 				var ips []net.IP
 				if query.domain == "localhost" || realMode {
 					// real 模式(zigbox 矩阵二级 DNS):测试域名解析真实环回
+					// 应答 IP 可配(real-dns-answer-ip):本机=127.0.0.1;host 侧 VM 服务=
+					// VM 网关 IP(local-echo 绑 0.0.0.0,VM 经网关访问,解析到网关才是可达地址)
 					if query.qtype == 1 {
-						ips = []net.IP{net.IPv4(127, 0, 0, 1)}
+						ips = []net.IP{net.ParseIP(realAnswerIP)}
 					} else {
 						ips = []net.IP{net.ParseIP("::1")}
 					}
@@ -507,6 +509,7 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	host := flag.String("host", "127.0.0.1", "bind address for loopback ports (0.0.0.0 = all interfaces; host-side VM service)")
 	tcpPort := flag.Int("tcp-port", 13333, "TCP+UDP echo port")
 	dnsPort := flag.Int("dns-port", 5533, "DNS echo port")
 	upstreamDns := flag.String("upstream-dns", "8.8.8.8", "upstream DNS for non-test domains")
@@ -520,6 +523,7 @@ func main() {
 	realityCertPath := flag.String("reality-cert", "certs/reality-untrusted.crt", "untrusted TLS certificate for reality steal dest")
 	realityKeyPath := flag.String("reality-key", "certs/reality-untrusted.key", "untrusted TLS key for reality steal dest")
 	realDnsPort := flag.Int("real-dns-port", 0, "secondary DNS port with real-map semantics (0=off; zigbox matrix 15353)")
+	realDnsAnswerIP := flag.String("real-dns-answer-ip", "127.0.0.1", "A-record answer IP for real-mode DNS (127.0.0.1 = echo on same host; host-side VM service = VM gateway IP)")
 	benchPort := flag.Int("bench-port", 0, "short-conn bench echo port, 10ms idle close (0=off; bench-tcp 13337)")
 	streamPort := flag.Int("stream-port", 0, "long-conn stream echo port, no idle close (0=off; bench-stream 13338)")
 	flag.Parse()
@@ -535,12 +539,12 @@ func main() {
 			go handleTcp(conn)
 		}
 	}
-	tcpLn, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *tcpPort))
+	tcpLn, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *host, *tcpPort))
 	if err != nil {
 		log.Fatalf("tcp listen: %v", err)
 	}
 	go serveTcpEcho(tcpLn, "tcp")
-	fmt.Printf("TCP_ECHO=127.0.0.1:%d\n", *tcpPort)
+	fmt.Printf("TCP_ECHO=%s:%d\n", *host, *tcpPort)
 
 	// ---- 额外 HTTP 回显端口(同协议自适应;zigbox 矩阵 NOTUN curl 目标)----
 	if *httpPort > 0 {
@@ -585,7 +589,7 @@ func main() {
 
 	// ---- bench echo(纯字节,短连接压测;零协议检测 + 10ms 空闲主动关)----
 	if *benchPort > 0 {
-		benchLn, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *benchPort))
+		benchLn, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *host, *benchPort))
 		if err != nil {
 			log.Fatalf("bench echo listen: %v", err)
 		}
@@ -599,12 +603,12 @@ func main() {
 				go handleBench(conn)
 			}
 		}()
-		fmt.Printf("BENCH_ECHO=127.0.0.1:%d\n", *benchPort)
+		fmt.Printf("BENCH_ECHO=%s:%d\n", *host, *benchPort)
 	}
 
 	// ---- stream echo(纯字节,长连接压测;无 idle close,io.Copy splice)----
 	if *streamPort > 0 {
-		streamLn, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *streamPort))
+		streamLn, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *host, *streamPort))
 		if err != nil {
 			log.Fatalf("stream echo listen: %v", err)
 		}
@@ -618,37 +622,37 @@ func main() {
 				go handleStream(conn)
 			}
 		}()
-		fmt.Printf("STREAM_ECHO=127.0.0.1:%d\n", *streamPort)
+		fmt.Printf("STREAM_ECHO=%s:%d\n", *host, *streamPort)
 	}
 
 	// ---- UDP echo(原样回传)----
-	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: *tcpPort})
+	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(*host), Port: *tcpPort})
 	if err != nil {
 		log.Fatalf("udp echo listen: %v", err)
 	}
 	go handleUdp(udpConn)
-	fmt.Printf("UDP_ECHO=127.0.0.1:%d\n", *tcpPort)
+	fmt.Printf("UDP_ECHO=%s:%d\n", *host, *tcpPort)
 
 	// ---- DNS echo(选择性代理;FakeIP 模式)----
-	dnsConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: *dnsPort})
+	dnsConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(*host), Port: *dnsPort})
 	if err != nil {
 		log.Fatalf("dns listen: %v", err)
 	}
-	go handleDns(dnsConn, *upstreamDns, false)
-	fmt.Printf("DNS_ECHO=127.0.0.1:%d\n", *dnsPort)
+	go handleDns(dnsConn, *upstreamDns, false, *realDnsAnswerIP)
+	fmt.Printf("DNS_ECHO=%s:%d\n", *host, *dnsPort)
 
 	// ---- 二级 DNS(real-map 模式:测试域名 → 127.0.0.1/::1;zigbox 矩阵)----
 	if *realDnsPort > 0 {
-		realDnsConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: *realDnsPort})
+		realDnsConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(*host), Port: *realDnsPort})
 		if err != nil {
 			log.Fatalf("real dns listen: %v", err)
 		}
-		go handleDns(realDnsConn, *upstreamDns, true)
-		fmt.Printf("REAL_DNS_ECHO=127.0.0.1:%d\n", *realDnsPort)
+		go handleDns(realDnsConn, *upstreamDns, true, *realDnsAnswerIP)
+		fmt.Printf("REAL_DNS_ECHO=%s:%d\n", *host, *realDnsPort)
 	}
 
 	// ---- H2 echo ----
-	h2Ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *h2Port))
+	h2Ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *host, *h2Port))
 	if err != nil {
 		log.Fatalf("h2 listen: %v", err)
 	}
@@ -660,14 +664,14 @@ func main() {
 			os.Exit(1)
 		}
 	}()
-	fmt.Printf("H2_ECHO=127.0.0.1:%d\n", *h2Port)
+	fmt.Printf("H2_ECHO=%s:%d\n", *host, *h2Port)
 
 	// ---- H3 echo ----
 	cert, err := tls.LoadX509KeyPair(*certPath, *keyPath)
 	if err != nil {
 		log.Fatalf("load cert: %v", err)
 	}
-	h3Conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: *h3Port})
+	h3Conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(*host), Port: *h3Port})
 	if err != nil {
 		log.Fatalf("h3 udp listen: %v", err)
 	}
@@ -682,7 +686,7 @@ func main() {
 			os.Exit(1)
 		}
 	}()
-	fmt.Printf("H3_ECHO=127.0.0.1:%d\n", *h3Port)
+	fmt.Printf("H3_ECHO=%s:%d\n", *host, *h3Port)
 
 	fmt.Println("RESULT=READY")
 	select {} // 常驻

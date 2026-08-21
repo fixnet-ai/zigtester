@@ -113,6 +113,7 @@ class PluginRef:
     """插件引用 — 项目 zigtester.yaml 中声明的插件及覆盖配置。"""
     name: str
     config: dict[str, Any] = field(default_factory=dict)
+    host: str | None = None    # 插件服务器 IP（None=按 plugin.yaml host > ZIGTESTER_PLUGIN_HOST > 127.0.0.1）
 
 
 @dataclass
@@ -298,9 +299,11 @@ def parse_config(path: str) -> ProjectConfig:
             plugins.append(PluginRef(name=p))
         elif isinstance(p, dict):
             overrides = p.get("config")
+            host_raw = p.get("host")
             plugins.append(PluginRef(
                 name=str(p["name"]),
                 config=dict(overrides) if isinstance(overrides, dict) else {},
+                host=str(host_raw) if host_raw is not None else None,
             ))
         else:
             pass  # 忽略无效条目
