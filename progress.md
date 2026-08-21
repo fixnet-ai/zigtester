@@ -376,3 +376,17 @@
 - **二分结论：bb48c8c 无辜**——去 route 段/去 shadowtls inbound 后仍 FAIL；回退 zo 代码亦 FAIL
 - **真凶链**：local-echo 统一重写（8-17 04:32 bbdf8ac）bench :13337 改为响应后 10ms idle 主动 FIN → srv EOF 时序变化 → zo 半关闭代码 relay/deinit 双 tun.close() 竞态必现（此前旧 echo 从不主动关、8-17 04:31 的 PASS 是旧 echo 最后一轮）。zo 侧已修（tun_relayed 所有权转移，zo commit 7cbc9ae，zo findings §31）
 - **框架启示**：echo 服务连接生命周期语义（谁先 FIN）是下游协议实现的隐式契约——变更后 zo 全量压测首跑即暴露 3 颗同构 UAF 雷（vless 爆、trojan/ss 侥幸）。此类行为变更落地后应主动触发下游项目全量压测回归
+
+## 2026-08-21: 修复 MCP 长任务超时（SSE 流 + progress 心跳）
+
+- **问题**：`zigtester_run` 跑 Performance 全量报「超过 MCP 调用超时上限」
+- **根因**：`server.py` `json_response=True` → mcp SDK 吞掉所有 progress 通知、只在最终 response 返回单 JSON，客户端 60s per-request 首字节超时
+- **修复**：
+  1. `main()`：`json_response=True` → `False`（SSE 流，priming event 立即发首字节）
+  2. `zigtester_run`：`def` → `async def` + `ctx: Context | None = None`，`run_project` 用 `asyncio.to_thread` 跑，事件循环每 10s `ctx.report_progress(counter, None, f"tests running ({elapsed}s)")` 心跳
+- **验证**：
+  - `content-type: text/event-stream` + `Transfer-Encoding: chunked`（SSE 生效）
+  - 端到端（mcp client 带 progressToken 跑 sleep 15 临时套件）：收到 1 次 progress `(1.0, None, 'tests running (10s elapsed)')` + result PASS
+  - `test_report_history.py` 15/15 通过；`server import OK`
+- **待办**：重启常驻 9020 MCP server 加载新代码（改动后才生效）
+- **改动文件**：`src/zigtester/server.py`（import + `_run_with_progress` + `zigtester_run` + `main()`）

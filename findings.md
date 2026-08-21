@@ -421,6 +421,20 @@ failed to parse certificate > open /usr/local/bin/certs/localhost.crt: no such f
 
 **教训**：跨语言/跨实现复刻协议时，**永远不要假设凭证可移植**。即便是同一协议族（VLESS/Reality/VMess），不同实现的"细节差异"足以让一份凭证作废。每个实现保留独立凭证，命名上明确前缀（`SB_VLESS_UUID` / `XRAY_VLESS_UUID`），避免后续维护者混淆。
 
+## MCP 长任务超时根因（2026-08-21）
+
+**现象**：`zigtester_run` 跑 Performance 全量（多持续套件）时，报「Performance 全量超过 MCP 调用超时上限」，异步测试无法进行。
+
+**根因**：`server.py` 用 `json_response=True`。mcp SDK `streamable_http.py` 在该模式下（`is_json_response_enabled` 分支）**吞掉所有 notifications（含 progress）**，只在收到最终 `JSONRPCResponse` 才返回单 JSON——客户端（Claude Code）60s 内收不到首字节 → per-request 超时。
+
+**协议依据**：MCP 对长任务的官方解法是「progress 通知（`notifications/progress`）+ Streamable HTTP SSE 流」。progress 值 MUST 单调递增，即使无真实进度也要发（message 当心跳）。zigtester 两个都没用上。
+
+**修复**：
+1. `main()`：`json_response=False` → 走 SSE 分支，`EventSourceResponse` 立即发 priming event（首字节秒到）
+2. `zigtester_run`：async + `ctx: Context`，`run_project` 放 `asyncio.to_thread`，事件循环每 10s `ctx.report_progress(counter, None, f"tests running ({elapsed}s)")` 心跳
+
+**教训**：MCP 工具的默认 `json_response` 语义对长任务是陷阱——单 JSON 响应 = 首字节 = 最终结果 = 无进度。凡长任务工具必须 SSE 流 + progress 心跳，不能靠客户端调大 timeout 硬扛。
+
 ## Visual/Browser Findings
 
 -

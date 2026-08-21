@@ -1,3 +1,34 @@
+# Task Plan: 修复 MCP 长任务超时（SSE 流 + progress 心跳）
+
+> **创建**: 2026-08-21
+> **状态**: ✅ 完成（待重启常驻 9020 server 生效）
+> **关联**: server.py / mcp SDK json_response 语义
+
+## Goal
+
+「Performance 全量超过 MCP 调用超时上限」——根因不是 per-suite 超时，而是 `server.py` 用 `json_response=True`，mcp SDK 在该模式下**吞掉所有 progress 通知、只在最终 response 才返回单 JSON**，客户端（Claude Code）60s per-request 首字节超时。
+
+## 方案
+
+1. `main()`：`json_response=True` → `False`（切 SSE 流，priming event 立即发首字节）
+2. `zigtester_run` 改 `async` + `ctx: Context`，`run_project` 用 `asyncio.to_thread` 跑，事件循环每 10s 发 `ctx.report_progress` 心跳（progress 单调递增 + message 已运行秒数）
+
+## 步骤
+
+- [x] 改 `server.py` `main()`：json_response=False
+- [x] 改 `zigtester_run`：async + ctx + to_thread + 心跳
+- [x] 验证：启动 server，带 progressToken 的 tools/call 确认 SSE + progress
+- [x] 回归：跑 `tests/` 现有测试（test_report_history 15/15）
+
+## 验证结果
+
+- `content-type: text/event-stream` + `Transfer-Encoding: chunked`（SSE 流生效）
+- 心跳 progress 经 HTTP 下发（`(1.0, None, 'tests running (10s elapsed)')`）
+- result 正确返回（slow-test PASS）
+- test_report_history.py 15/15 通过
+
+---
+
 # Task Plan: zigtester MCP 替换兄弟项目 test skills
 
 > **创建**: 2026-08-07

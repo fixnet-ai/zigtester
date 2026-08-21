@@ -12,11 +12,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
+import time
 from pathlib import Path
+from typing import Any
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 
 
 def _augment_path() -> None:
@@ -97,6 +100,45 @@ def _load_project(dir: str | None) -> "DiscoveredProject | None":
     )
 
 
+_HEARTBEAT_INTERVAL_S = 10.0
+
+
+async def _run_with_progress(ctx: Context, runner) -> Any:
+    """在线程池执行同步 runner，事件循环周期发 progress 通知保活。
+
+    `run_project` 是同步阻塞的（子进程 `communicate`）。若直接在 async 工具
+    里同步调用会阻塞事件循环，心跳无法并发。因此用 `asyncio.to_thread` 放到
+    线程池，主循环每 `_HEARTBEAT_INTERVAL_S` 秒发一次 `report_progress`
+    （progress 单调递增 + message 已运行秒数），既满足 MCP 协议进度语义
+    （progress 值 MUST increase），也让客户端在长任务期间持续收到 SSE 事件、
+    避免 idle 超时。
+    """
+    run_task = asyncio.create_task(asyncio.to_thread(runner))
+
+    async def _heartbeat() -> None:
+        counter = 0
+        start = time.monotonic()
+        while not run_task.done():
+            await asyncio.sleep(_HEARTBEAT_INTERVAL_S)
+            if run_task.done():
+                break
+            counter += 1
+            elapsed = int(time.monotonic() - start)
+            try:
+                await ctx.report_progress(
+                    counter, None, f"tests running ({elapsed}s elapsed)"
+                )
+            except Exception:
+                # 进度通知失败（如客户端未带 progressToken）不影响测试执行
+                pass
+
+    hb_task = asyncio.create_task(_heartbeat())
+    try:
+        return await run_task
+    finally:
+        hb_task.cancel()
+
+
 # ── 工具 ──────────────────────────────────────────────────
 
 
@@ -171,10 +213,11 @@ def zigtester_list(dir: str | None = None) -> dict:
 
 
 @mcp.tool()
-def zigtester_run(
+async def zigtester_run(
     level: str = "all",
     suite: str | None = None,
     dir: str | None = None,
+    ctx: Context | None = None,
 ) -> dict:
     """执行测试并返回结构化结果 — 所有测试的唯一入口。
 
@@ -209,7 +252,14 @@ def zigtester_run(
             return {"error": f"无效层级: {level}，有效值: {', '.join(VALID_LEVELS)}"}
         levels = [level]
 
-    pr = run_project(p, levels, suite_filter=suite)
+    if ctx is not None:
+        # 长任务：线程池跑 run_project，事件循环发 progress 心跳保活，
+        # 避免同步阻塞导致 MCP 客户端超时。
+        pr = await _run_with_progress(
+            ctx, lambda: run_project(p, levels, suite_filter=suite)
+        )
+    else:
+        pr = run_project(p, levels, suite_filter=suite)
 
     # 保存历史
     try:
@@ -395,7 +445,11 @@ def main():
     print(f"[zigtester] MCP Server 启动: http://{host}:{port}  (PID {pid})", file=sys.stderr)
 
     try:
-        mcp.run(transport="http", host=host, port=port, stateless_http=True, json_response=True)
+        # json_response=False → 走 SSE 流：立即发 priming event（首字节秒到），
+        # progress 通知作为 SSE 事件流式下发。若用 True，mcp SDK 会吞掉所有
+        # progress 通知、只在最终 response 才返回单 JSON，长任务会撞客户端
+        # per-request 超时。
+        mcp.run(transport="http", host=host, port=port, stateless_http=True, json_response=False)
     finally:
         _cleanup_pid()
         print(f"[zigtester] MCP Server 已停止 (PID {pid})", file=sys.stderr)
