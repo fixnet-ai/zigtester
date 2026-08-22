@@ -530,6 +530,17 @@ def run_project(
                 ordered = filtered
 
             for suite in ordered:
+                # per_suite_only 套件：仅允许 --suite 显式运行。
+                # --level 全量执行（suite_filter=None）时自动跳过，禁止一次跑全部压测。
+                if suite_filter is None and suite.per_suite_only:
+                    result.suites.append(SuiteResult(
+                        suite_name=suite.name,
+                        level=level_name,
+                        status="SKIP",
+                        message="per_suite_only: 仅允许 --suite 单独运行（禁止 --level 全量压测）",
+                    ))
+                    continue
+
                 # pre-flight：每个套件执行前自检插件环境（无插件时零开销）
                 if plugin_mgr is not None:
                     fatal = plugin_mgr.ensure_ready()

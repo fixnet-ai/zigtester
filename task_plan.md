@@ -449,3 +449,42 @@ VM 经可配置服务器 IP（默认 127.0.0.1，VM 场景 = host 网关 IP，�
 - zigbox 试点是关键里程碑 — 验证整个三层架构的可行性
 - 试点打磨后的经验写入 findings.md，指导 Phase 2-4
 - 不做：不删除测试脚本、不修改语言技能、不强制统一测试工具
+
+---
+
+# Task Plan: 压测治理 — per_suite_only 字段（禁止 --level 全量压测）
+
+> **创建**: 2026-08-22
+> **状态**: 🔄 进行中
+> **关联**: zigoutbounds zigtester.yaml / runner.py / config.py / schema.json
+
+## 背景
+
+zigoutbounds 用户要求「不要一次做全量压测，只能逐个协议做压测」。根因：
+`--level performance` 一次运行该 level 全部 25 个 per-protocol 套件（2026-08-22 实测
+321.6s、6 FAIL）。schema 无任何字段可禁止 level 全量 —— 需在框架加套件级约束。
+
+## 方案
+
+`per_suite_only: true`（套件级布尔）：
+- `--suite <name>` 显式指定 → 正常运行
+- `--level X` 全量执行（suite_filter=None）→ 自动 SKIP + message 提示「仅允许 --suite 单独运行」
+
+改动文件：schemas/zigtester.schema.json / config.py / runner.py / reporter.py / server.py + zigoutbounds zigtester.yaml
+
+## 步骤
+
+- [x] schema.json 加 per_suite_only
+- [x] config.py SuiteConfig + _parse_suite
+- [x] runner.py run_project 全量时跳过
+- [x] reporter/server 列表标注
+- [x] 单元测试 tests/test_per_suite_only.py（4/4）
+- [x] zigoutbounds 25 套件应用（25/25，14 tcp + 11 stream）
+- [x] CLI 验证（全量 25 SKIP 2.3s / --suite 单跑 PASS）+ 重启常驻 9020 server 生效
+
+## 验证结果（2026-08-22）
+
+- `zigtester run --level performance` → 25 SKIP，2.3s（原 321.6s），每条 message 提示「仅允许 --suite 单独运行」
+- `zigtester run --level performance --suite bench-tcp-direct` → 单跑 1 套件 PASS（p99=11.4ms）
+- zigtester 自身单测：test_per_suite_only 4/4 + test_report_history 15/15 + test_env_guard 15/15
+- MCP 端（9020 server）待重启后 curl 验证 per_suite_only 字段下发

@@ -88,6 +88,11 @@
           "default": false,
           "description": "是否需要 sudo"
         },
+        "per_suite_only": {
+          "type": "boolean",
+          "default": false,
+          "description": "仅允许 --suite 单独运行；所在 level 全量执行时自动跳过（禁止一次跑全部压测）"
+        },
         "parser": {
           "type": "string",
           "enum": ["zig_test", "line_count", "test_protocols", "bench", "custom"],

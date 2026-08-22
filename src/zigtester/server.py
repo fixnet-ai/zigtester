@@ -198,6 +198,7 @@ def zigtester_list(dir: str | None = None) -> dict:
                     "command": s.command,
                     "timeout": s.timeout,
                     "sudo": s.sudo,
+                    "per_suite_only": s.per_suite_only,
                     "parser": s.parser,
                     "depends_on": s.depends_on,
                 }

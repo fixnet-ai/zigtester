@@ -88,6 +88,7 @@ class SuiteConfig:
     command: str
     timeout: int = DEFAULT_TIMEOUT
     sudo: bool = False
+    per_suite_only: bool = False    # 仅允许 --suite 单独运行；level 全量执行时自动跳过
     parser: str = "line_count"
     depends_on: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
@@ -246,6 +247,7 @@ def _parse_suite(raw: dict, global_settings: ProjectSettings) -> SuiteConfig:
         command=_env_subst(str(raw["command"])),
         timeout=int(timeout),
         sudo=bool(raw.get("sudo", False)),
+        per_suite_only=bool(raw.get("per_suite_only", False)),
         parser=str(raw.get("parser", "line_count")),
         depends_on=[str(d) for d in raw.get("depends_on", [])],
         env=env,

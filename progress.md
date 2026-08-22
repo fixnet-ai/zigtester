@@ -390,3 +390,16 @@
   - `test_report_history.py` 15/15 通过；`server import OK`
 - **待办**：重启常驻 9020 MCP server 加载新代码（改动后才生效）
 - **改动文件**：`src/zigtester/server.py`（import + `_run_with_progress` + `zigtester_run` + `main()`）
+
+## 2026-08-22: per_suite_only 字段 — 禁止 --level 全量压测
+
+- **需求**：zigoutbounds 用户要求「不要一次做全量压测，只能逐个协议做压测」。根因 = `--level performance` 一次运行该 level 全部 25 个 per-protocol 套件（2026-08-22 实测 321.6s / 6 FAIL），schema 无任何字段可禁止 level 全量
+- **实现**：套件级布尔 `per_suite_only`（默认 false，向后兼容）——`--suite <name>` 显式指定正常执行；`--level` 全量执行（suite_filter=None）自动 SKIP + message「仅允许 --suite 单独运行」
+- **改动文件**：`schemas/zigtester.schema.json` / `config.py`（SuiteConfig + _parse_suite）/ `runner.py`（run_project 全量跳过）/ `reporter.py`（list `[suite-only]` 标注）/ `server.py`（zigtester_list 下发字段）+ zigoutbounds `zigtester.yaml`（25 套件 + 头部注释）
+- **验证**：
+  - zigtester 单测：test_per_suite_only.py 4/4（新增）+ test_report_history.py 15/15 + test_env_guard.py 15/15
+  - `zigtester run --level performance`（zigoutbounds）→ 25 SKIP，2.3s（原 321.6s）
+  - `zigtester run --level performance --suite bench-tcp-direct` → 单跑 1 套件 PASS（p99=11.4ms）
+  - `zigtester list` → performance 25 套件全部 `[suite-only]` 标注
+- **正确用法**：`zigtester_run --level performance --suite bench-tcp-<proto>`（或 bench-stream-<proto>）逐个协议跑
+- **待办**：重启常驻 9020 server 使 MCP 端同步新代码 + curl 验证 per_suite_only 字段下发

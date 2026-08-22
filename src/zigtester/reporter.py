@@ -171,7 +171,8 @@ class Reporter:
             for s in lc.suites:
                 deps = f" ← {', '.join(s.depends_on)}" if s.depends_on else ""
                 sudo_mark = f" {_YELLOW}[sudo]{_RESET}" if s.sudo else ""
-                print(f"    {s.name}: {s.command}{sudo_mark}{deps}")
+                suite_only_mark = f" {_YELLOW}[suite-only]{_RESET}" if s.per_suite_only else ""
+                print(f"    {s.name}: {s.command}{sudo_mark}{suite_only_mark}{deps}")
             print()
 
     # ── 执行结果 ───────────────────────────────────────────
