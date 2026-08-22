@@ -8,6 +8,44 @@ from typing import Any
 from .config import MetricDef, Threshold
 
 
+# zigbox test_bench.py + zigoutbounds test_engine.py 的 bench 指标提取正则。
+# 单档用 re.search 对全 stdout 取首匹配;多档(并发扫描)按行提取存 {key}_c{N}。
+_BENCH_PATTERNS: list[tuple[str, str]] = [
+    (r"吞吐:\s*([0-9.]+)\s*req/s", "throughput_reqs_per_sec"),
+    (r"传输:\s*([0-9.]+)\s*MB/s", "transfer_mb_per_sec"),
+    (r"p50:\s*([0-9.]+)\s*ms", "latency_p50_ms"),
+    (r"p95:\s*([0-9.]+)\s*ms", "latency_p95_ms"),
+    (r"p99:\s*([0-9.]+)\s*ms", "latency_p99_ms"),
+    (r"p50:\s+([0-9.]+)(?!\s*ms)", "latency_p50_raw"),
+    (r"p95:\s+([0-9.]+)(?!\s*ms)", "latency_p95_raw"),
+    (r"p99:\s+([0-9.]+)(?!\s*ms)", "latency_p99_raw"),
+    (r"错误:\s*([0-9]+)", "error_count"),
+    (r"成功:\s*([0-9]+)", "success_count"),
+    (r"总计:\s*([0-9]+)", "total_requests"),
+    # zigoutbounds test_engine.py bench 输出（KEY=VALUE 格式）:
+    (r"LATENCY_MIN_MS=([0-9.]+)", "latency_min_ms"),
+    (r"AVG_MS=([0-9.]+)", "latency_avg_ms"),
+    (r"P50_MS=([0-9.]+)", "latency_p50_ms"),
+    (r"P99_MS=([0-9.]+)", "latency_p99_ms"),
+    (r"THROUGHPUT_MBPS=([0-9.]+)", "throughput_mbps"),
+    (r"REQ_S=([0-9.]+)", "req_s"),
+    (r"FAILED=([0-9]+)", "failed"),
+]
+
+
+def _bench_from_text(text: str) -> dict[str, float]:
+    """在给定文本(整段 stdout 或单行)内提取全部 bench 指标(每 key 首匹配)。"""
+    d: dict[str, float] = {}
+    for pat, key in _BENCH_PATTERNS:
+        m = re.search(pat, text)
+        if m:
+            try:
+                d[key] = float(m.group(1))
+            except ValueError:
+                pass
+    return d
+
+
 class MetricExtractor:
     """从命令 stdout 提取性能指标。"""
 
@@ -194,46 +232,37 @@ class MetricExtractor:
 
     @staticmethod
     def _parse_bench(stdout: str, exit_code: int) -> dict[str, float]:
-        """解析 zigbox test_bench.py 输出，提取吞吐/延迟/传输速率。
+        """解析 zigbox test_bench.py / zigoutbounds test_engine.py 输出，提取吞吐/延迟。
 
         格式样例:
           吞吐: 520.3 req/s
           p50: 12.5ms
           p99: 85.2ms
           传输: 45.6 MB/s
+
+        多档并发扫描（test_engine.py --concurrency-sweep 输出多行
+        `MODE=bench-tcp CONCURRENCY=N`）→ 每档存 `{key}_c{N}`，裸 key 保留
+        首档作默认（兼容 message/history 显示）。
         """
         result: dict[str, float] = {
             "exit_code": float(exit_code),
         }
-        patterns: list[tuple[str, str]] = [
-            (r"吞吐:\s*([0-9.]+)\s*req/s", "throughput_reqs_per_sec"),
-            (r"传输:\s*([0-9.]+)\s*MB/s", "transfer_mb_per_sec"),
-            (r"p50:\s*([0-9.]+)\s*ms", "latency_p50_ms"),
-            (r"p95:\s*([0-9.]+)\s*ms", "latency_p95_ms"),
-            (r"p99:\s*([0-9.]+)\s*ms", "latency_p99_ms"),
-            # 无 ms 后缀的格式（微秒或独立数字），用负向前瞻排除 ms 后缀
-            (r"p50:\s+([0-9.]+)(?!\s*ms)", "latency_p50_raw"),
-            (r"p95:\s+([0-9.]+)(?!\s*ms)", "latency_p95_raw"),
-            (r"p99:\s+([0-9.]+)(?!\s*ms)", "latency_p99_raw"),
-            (r"错误:\s*([0-9]+)", "error_count"),
-            (r"成功:\s*([0-9]+)", "success_count"),
-            (r"总计:\s*([0-9]+)", "total_requests"),
-            # zigoutbounds test_engine.py bench 输出（KEY=VALUE 格式,bench-tcp 行在
-            # bench-udp 行之前,re.search 取首个匹配 = TCP 数据）:
-            (r"LATENCY_MIN_MS=([0-9.]+)", "latency_min_ms"),
-            (r"AVG_MS=([0-9.]+)", "latency_avg_ms"),
-            (r"P50_MS=([0-9.]+)", "latency_p50_ms"),
-            (r"P99_MS=([0-9.]+)", "latency_p99_ms"),
-            (r"THROUGHPUT_MBPS=([0-9.]+)", "throughput_mbps"),
-            (r"REQ_S=([0-9.]+)", "req_s"),
-        ]
-        for pat, key in patterns:
-            m = re.search(pat, stdout)
+        # 多档并发扫描：收集全部 bench-tcp 行及其并发档位
+        sweep: list[tuple[int, str]] = []
+        for line in stdout.splitlines():
+            m = re.search(r"MODE=bench-tcp CONCURRENCY=(\d+)", line)
             if m:
-                try:
-                    result[key] = float(m.group(1))
-                except ValueError:
-                    pass
+                sweep.append((int(m.group(1)), line))
+        if len({c for c, _ in sweep}) >= 2:
+            for c, line in sweep:
+                for k, v in _bench_from_text(line).items():
+                    result[f"{k}_c{c}"] = v
+            # 裸 key 保留最小并发档（首档）作默认
+            first = min(sweep, key=lambda x: x[0])
+            result.update(_bench_from_text(first[1]))
+            return result
+        # 单档：re.search 对全 stdout 取首匹配（bench-tcp 行在 bench-udp 前 = TCP 数据）
+        result.update(_bench_from_text(stdout))
         return result
 
     # ── 阈值检查 ───────────────────────────────────────────
