@@ -4,7 +4,7 @@
 
 ## 项目概述
 
-**zigtester** 是 fixnet 生态的自动测试框架，通过标准化 `zigtester.yaml` 配置文件自动扫描并执行单元测试、功能测试、性能测试和压力测试。
+**zigtester** 是 fixnet 生态的自动测试框架，通过标准化 `zigtester.yaml` 配置文件自动扫描并执行单元测试、功能测试和性能测试（压力测试并入性能测试，作为其长时持续 + 资源趋势形态）。
 
 ### 定位
 
@@ -154,7 +154,7 @@ ZIGTESTER_ROOT=~/works/2025/fixnet python -m zigtester.server &
 
 - `../zigfoundation/zigtester.yaml` — 单层级（unit）
 - `../zigbox/zigtester.yaml` — 三层级（unit + functional + performance）+ `plugins: [local-echo]`
-- `../zigoutbounds/zigtester.yaml` — 四层级（unit + functional + performance + stress）+ `plugins: [local-echo, sing-box]`
+- `../zigoutbounds/zigtester.yaml` — 三层级（unit + functional + performance）+ `plugins: [local-echo, sing-box]`（长时套件 `bench-long-*` 位于 performance 层，经 `per_suite_only` 隔离）
 
 ### plugins 字段
 
@@ -234,5 +234,5 @@ local-echo 端口契约（各项目测试脚本共享，禁止项目脚本自行
 
 - `../zigbox/tests/lib/report.py` — TestResult/TestSuite 四状态模型（PASS/FAIL/SKIP/ERROR）+ 三路输出（复用模式）
 - `../zigbox/tests/lib/zigbox.py` — 子进程生命周期管理（抽象为 TestExecutor）
-- `../zigbox/tests/SKILL.md` — 4 层测试模型（unit/functional/performance/stress）
+- `../zigbox/tests/SKILL.md` — 3 层测试模型（unit/functional/performance）
 - `../zigoutbounds/tests/protocol-tester/` — 依赖管道（crypto-only → E2E）+ benchmark 编排

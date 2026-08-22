@@ -66,7 +66,6 @@ def create_diagram():
         ("unit", 950, 220),
         ("functional", 1100, 220),
         ("performance", 950, 290),
-        ("stress", 1100, 290),
     ]
     
     for name, x, y in levels:

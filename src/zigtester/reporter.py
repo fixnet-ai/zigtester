@@ -71,6 +71,59 @@ def extract_failure_lines(text: str, limit: int = 10) -> list[str]:
     return lines
 
 
+# ── performance 套件分组（报表展示层合并，存储/回归仍按套件）──
+# 压力并入性能后同协议有多个模式套件：bench-tcp-<proto> / bench-stream-<proto>
+# / bench-long-<proto> / bench-tcp-sweep-<proto>。展示层按协议组重排并排对比，
+# 同名指标（REQ_S/P99_MS）用模式前缀消歧（纯展示标签，不进 metrics 字典/历史）。
+
+# 模式段匹配顺序关键：tcp-sweep 必须在 tcp 之前（bench-tcp-sweep-direct 才能
+# 正确裁出 direct 而非 sweep-direct）。
+_GROUP_RE = re.compile(r"^bench-(?:(?:tcp-sweep|tcp|stream|udp|long|sweep)-)?(.+)$")
+_MODE_RE = re.compile(r"^bench-(tcp-sweep|tcp|stream|udp|long)-")
+
+
+def performance_group(suite_name: str) -> str:
+    """提取 performance 套件的协议组名。
+
+    bench-tcp-direct / bench-stream-direct / bench-long-direct /
+    bench-tcp-sweep-direct → "direct"（同协议多模式合并一组）；
+    zigbox 短名 bench-socks5 / bench-long → 自身 token；非 bench 套件 → 自身名。
+    """
+    m = _GROUP_RE.match(suite_name)
+    return m.group(1) if m else suite_name
+
+
+def mode_of(suite_name: str) -> str:
+    """提取 performance 套件的模式前缀（展示消歧）。
+
+    bench-tcp-* → "tcp"、bench-stream-* → "stream"、bench-long-* → "long"、
+    bench-tcp-sweep-* → "sweep"；其余（zigbox 短名/非 bench）→ ""。
+    """
+    m = _MODE_RE.match(suite_name)
+    if not m:
+        return ""
+    return "sweep" if m.group(1) == "tcp-sweep" else m.group(1)
+
+
+def group_performance_suites(
+    suites: list["SuiteResult"],
+) -> list[dict[str, Any]]:
+    """将 performance 层套件按协议组重排，返回有序组列表。
+
+    每项 {"name": 组名, "suites": [SuiteResult, ...]}，组间按组名字母序，
+    组内保持 yaml 定义顺序。非 performance 套件不参与。
+    """
+    groups: dict[str, list[SuiteResult]] = {}
+    for s in suites:
+        if s.level != "performance":
+            continue
+        groups.setdefault(performance_group(s.suite_name), []).append(s)
+    return [
+        {"name": g, "suites": groups[g]}
+        for g in sorted(groups)
+    ]
+
+
 def _fmt_resource(rp: "ResourceSnapshot") -> str:
     """格式化资源快照为紧凑单行字符串。
 
@@ -160,13 +213,13 @@ class Reporter:
             return
 
         print(f"{_BOLD}{project.name}{_RESET} — 测试套件\n")
-        level_order = ["unit", "functional", "performance", "stress"]
+        level_order = ["unit", "functional", "performance"]
         for level_name in level_order:
             lc = project.config.levels.get(level_name)
             if lc is None or not lc.suites:
                 continue
             label = {"unit": "单元", "functional": "功能",
-                     "performance": "性能", "stress": "压力"}.get(level_name, level_name)
+                     "performance": "性能"}.get(level_name, level_name)
             print(f"  {_CYAN}[{level_name}]{_RESET} {label}")
             for s in lc.suites:
                 deps = f" ← {', '.join(s.depends_on)}" if s.depends_on else ""
@@ -265,12 +318,25 @@ class Reporter:
         print(f"  耗时: {elapsed:.1f}s")
         print(f"{_BOLD}{'-'*60}{_RESET}")
 
-        # 按状态排序
+        # 非 performance：按状态排序（原逻辑）
+        other = [s for s in result.suites if s.level != "performance"]
         for status in ["PASS", "FAIL", "ERROR", "SKIP"]:
-            for s in result.suites:
+            for s in other:
                 if s.status != status:
                     continue
                 self._print_suite_terminal(s)
+
+        # performance：按协议组重排，组间分隔头（同协议 tcp/stream/long/sweep 并排对比）
+        perf_groups = group_performance_suites(result.suites)
+        if perf_groups:
+            print(f"\n  {_CYAN}── 性能测试（按协议组）{_RESET}")
+            for group in perf_groups:
+                print(f"  {_BOLD}[{group['name']}]{_RESET}")
+                for status in ["PASS", "FAIL", "ERROR", "SKIP"]:
+                    for s in group["suites"]:
+                        if s.status != status:
+                            continue
+                        self._print_suite_terminal(s)
 
         # 项目级资源汇总
         self._print_resource_summary(result.suites)
@@ -309,10 +375,12 @@ class Reporter:
             line = f"  {color}{icon}{_RESET} {level_tag}{suite.suite_name}{duration}{msg}"
         print(line)
 
-        # 详细模式显示指标
+        # 详细模式显示指标（performance 套件同名键加模式前缀消歧）
         if self.verbose and suite.metrics:
+            mode = mode_of(suite.suite_name)
             for k, v in suite.metrics.items():
-                print(f"      {_DIM}{k}={v}{_RESET}")
+                label = f"{mode}:{k}" if mode else k
+                print(f"      {_DIM}{label}={v}{_RESET}")
 
         # 详细模式显示完整资源（峰值 + 均值）
         if self.verbose and suite.resource_peak.sample_count > 0:
@@ -401,16 +469,33 @@ class Reporter:
         lines.append("")
 
         lines.append("### 套件明细")
-        lines.append("| 状态 | 层级 | 套件 | 耗时 | 资源 | 说明 |")
-        lines.append("|------|------|------|------|------|------|")
-        for s in result.suites:
-            icon = {"PASS": "✅", "FAIL": "❌", "SKIP": "○", "ERROR": "⚠"}.get(
-                s.status, "?"
-            )
-            duration = f"{s.duration_ms:.0f}ms" if s.duration_ms > 0 else "-"
-            msg = s.message.replace("|", "\\|") if s.message else "-"
-            res_col = _fmt_resource(s.resource_peak)
-            lines.append(f"| {icon} | {s.level} | {s.suite_name} | {duration} | {res_col} | {msg} |")
+
+        def _append_rows(ss: list[Any]) -> None:
+            for s in ss:
+                icon = {"PASS": "✅", "FAIL": "❌", "SKIP": "○", "ERROR": "⚠"}.get(
+                    s.status, "?"
+                )
+                duration = f"{s.duration_ms:.0f}ms" if s.duration_ms > 0 else "-"
+                msg = s.message.replace("|", "\\|") if s.message else "-"
+                mode = mode_of(s.suite_name)
+                if mode:
+                    msg = f"`{mode}` {msg}"
+                res_col = _fmt_resource(s.resource_peak)
+                lines.append(
+                    f"| {icon} | {s.level} | {s.suite_name} | {duration} | {res_col} | {msg} |"
+                )
+
+        # 非 performance 原顺序；performance 按协议组重排（组间加小节标题）
+        non_perf = [s for s in result.suites if s.level != "performance"]
+        if non_perf:
+            lines.append("| 状态 | 层级 | 套件 | 耗时 | 资源 | 说明 |")
+            lines.append("|------|------|------|------|------|------|")
+            _append_rows(non_perf)
+        for group in group_performance_suites(result.suites):
+            lines.append(f"\n**[{group['name']}]**")
+            lines.append("| 状态 | 层级 | 套件 | 耗时 | 资源 | 说明 |")
+            lines.append("|------|------|------|------|------|------|")
+            _append_rows(group["suites"])
         lines.append("")
 
         if all_ok and pass_n > 0:
@@ -516,8 +601,12 @@ class Reporter:
             else:
                 dur_str = "-"
 
-            # 关键指标：优先用 message，fallback 到退出码
+            # 关键指标：优先用 message，fallback 到退出码。
+            # performance 套件加模式前缀（tcp/stream/long/sweep）消歧同名键。
             key = s.message.strip() if s.message else f"exit={s.exit_code}"
+            mode = mode_of(s.suite_name)
+            if mode:
+                key = f"[{mode}] {key}"
 
             # 资源列
             res_col = _fmt_resource(s.resource_peak)
@@ -587,11 +676,17 @@ class Reporter:
     def print_history(
         self, project: str, suite: str,
         records: list[dict], regressions: list[Regression],
+        group_records: dict[str, list[dict]] | None = None,
     ) -> None:
-        """打印历史记录和回归检测结果。"""
+        """打印历史记录和回归检测结果。
+
+        group_records: 协议组视图 — {套件名: records}。非 None 时渲染
+        组内全部成员套件的合并表（每行 = 套件/时间/状态/指标，指标带模式
+        前缀消歧），不破坏单套件精确匹配的原有逻辑。
+        """
         if self.format == "json":
             from .history import detect_flaky
-            print(json.dumps({
+            out: dict[str, Any] = {
                 "project": project,
                 "suite": suite,
                 "flaky": detect_flaky(records),
@@ -614,7 +709,26 @@ class Reporter:
                     }
                     for reg in regressions
                 ],
-            }, indent=2, ensure_ascii=False))
+            }
+            if group_records is not None:
+                out["groups"] = {
+                    member: [
+                        {
+                            "timestamp": r.get("timestamp"),
+                            "status": r.get("status"),
+                            "duration_ms": r.get("duration_ms"),
+                            "metrics": r.get("metrics"),
+                        }
+                        for r in recs
+                    ]
+                    for member, recs in group_records.items()
+                }
+            print(json.dumps(out, indent=2, ensure_ascii=False))
+            return
+
+        # 协议组视图（suite 为组名时由调用方传入 group_records）
+        if group_records is not None:
+            self._print_history_group(suite, group_records)
             return
 
         print(f"\n{_BOLD}{project}/{suite} — 历史记录{_RESET}\n")
@@ -654,3 +768,39 @@ class Reporter:
                 )
         else:
             print(f"\n  {_GREEN}✓ 未检测到性能退化{_RESET}")
+
+    def _print_history_group(
+        self, group: str, group_records: dict[str, list[dict]],
+    ) -> None:
+        """协议组历史视图 — 合并展示组内全部成员套件的趋势。
+
+        每行 = (套件, 时间, 状态, 耗时, 指标)，指标带模式前缀
+        （tcp:/stream:/long:/sweep:）消歧同名键。回归检测保持按套件
+        （单套件精确查询），组视图只做趋势合并展示。
+        """
+        print(f"\n{_BOLD}{group} 协议组 — 历史记录{_RESET}\n")
+
+        if not group_records:
+            print("  (组内无历史记录)")
+            return
+
+        print(f"  {'套件':<28} {'时间':<14} {'状态':<6} {'耗时':>8}  指标")
+        print(f"  {'-'*28} {'-'*14} {'-'*6} {'-'*8}  {'-'*30}")
+        for member in sorted(group_records):
+            mode = mode_of(member)
+            prefix = f"{mode}:" if mode else ""
+            for r in group_records[member]:
+                ts = r.get("timestamp", "")[:19]
+                status = r.get("status", "?")
+                dur = f"{r.get('duration_ms', 0):.0f}ms"
+                metrics = r.get("metrics", {})
+                metric_str = " ".join(
+                    f"{prefix}{k}={v}"
+                    for k, v in metrics.items()
+                    if k not in ("exit_code",)
+                )
+                color = _STATUS_COLORS.get(status, _RESET)
+                print(
+                    f"  {member:<28} {ts:<14} {color}{status:<6}{_RESET} "
+                    f"{dur:>8}  {_DIM}{metric_str}{_RESET}"
+                )

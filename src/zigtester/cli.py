@@ -163,6 +163,20 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_history(args: argparse.Namespace) -> int:
     """history 子命令 — 查看历史。"""
+    from .history import list_suites
+    from .reporter import performance_group
+
+    # 协议组视图：suite 不在已知套件名中 → 按协议组名合并组内全部成员历史
+    known = list_suites(args.project)
+    group_records: dict[str, list[dict]] | None = None
+    if args.suite not in known and known:
+        members = [s for s in known if performance_group(s) == args.suite]
+        if members:
+            group_records = {
+                m: load_history(args.project, m, n=args.limit)
+                for m in members
+            }
+
     records = load_history(args.project, args.suite, n=args.limit)
 
     # 当前指标（最新一条）
@@ -172,7 +186,9 @@ def cmd_history(args: argparse.Namespace) -> int:
     regressions = check_regression(current_metrics, records, current_resource=current_resource)
 
     reporter = Reporter(format=args.report_format)
-    reporter.print_history(args.project, args.suite, records, regressions)
+    reporter.print_history(
+        args.project, args.suite, records, regressions, group_records=group_records
+    )
     return 0
 
 

@@ -79,7 +79,7 @@ prepare 阶段已知插件残留（如上一轮异常退出的 local-echo）→ 
 ### zigtester MCP 能力矩阵
 - 已实现：`zigtester_list`、`zigtester_run`、`zigtester_scan`、`zigtester_history`
 - `zigtester_run` 支持 `--report-format markdown|json|terminal`
-- `zigtester_list` 按 level（unit/functional/performance/stress）分组展示
+- `zigtester_list` 按 level（unit/functional/performance）分组展示
 - `zigtester_history` 提供历史回归检测（当前 vs 历史移动平均）— skill 没有的新能力
 - `zigtester_scan` 跨项目发现 — skill 没有的新能力
 

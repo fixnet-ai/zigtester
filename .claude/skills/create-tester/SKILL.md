@@ -116,9 +116,9 @@ description: >
 <列出检测到的脚本，默认全选>
 ```
 
-**Q5: 是否需要性能/压力测试**（仅当未检测到 benchmark 脚本但用户可能想添加时）
+**Q5: 是否需要性能测试**（长时/压力并入性能层；仅当未检测到 benchmark 脚本但用户可能想添加时）
 ```
-是否添加性能/压力测试套件？如果项目尚未有 benchmark 脚本，可以先留空模板。
+是否添加性能测试套件（含长时/资源趋势 bench-long-*）？如果项目尚未有 benchmark 脚本，可以先留空模板。
 ```
 
 **禁止问的问题**：
@@ -320,8 +320,7 @@ else:
 层级:
   unit:         <N> 套件 — <套件名列表>
   functional:   <N> 套件 — <套件名列表>
-  performance:  <N> 套件 — <套件名列表>
-  stress:       <N> 套件 — <套件名列表>
+  performance:  <N> 套件 — <套件名列表>（含长时/资源趋势 bench-long-* 套件）
 
 下一步:
   zigtester run <name> --level unit          # 运行单元测试

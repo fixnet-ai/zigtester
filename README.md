@@ -96,14 +96,15 @@ What you see:
 
 ## Core Capabilities
 
-### Four-level test model
+### Three-level test model
 
 | Level | Focus | Typical use |
 |-------|-------|-------------|
 | **unit** | Pure code correctness | `zig build test`, no network dependencies |
 | **functional** | Protocol & integration | Multi-protocol interop, end-to-end validation |
-| **performance** | Throughput & latency | Benchmarks, threshold checks, regression detection |
-| **stress** | Stability under load | High concurrency, resource limit monitoring, long-running |
+| **performance** | Throughput, latency & long-run stability | Benchmarks, long-running sustained load + resource/leak trends (per_suite_only suites), threshold checks, regression detection |
+
+> 压力测试并入性能测试:长时持续 + 资源趋势套件(`bench-long-*`)与短时基准(`bench-tcp-*`)等同层分套件,通过 `per_suite_only: true` 禁止混入 `--level performance` 全量;报表在展示层按协议分组合并。
 
 ### Built-in resource monitoring
 

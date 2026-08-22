@@ -5,7 +5,7 @@
 
 ## Context
 
-当前 6 个兄弟项目（zigfoundation、zigtun、zigproxy、zigdns、zigoutbounds、zigbox）各自拥有独立的测试体系，缺乏统一的测试配置格式、跨项目执行器、标准报告输出和历史回归检测。zigtester 目标是成为一个可被每个项目复用的 Python 自动测试框架，通过标准化配置文件自动扫描并执行单元测试、功能测试、性能测试和压力测试。
+当前 6 个兄弟项目（zigfoundation、zigtun、zigproxy、zigdns、zigoutbounds、zigbox）各自拥有独立的测试体系，缺乏统一的测试配置格式、跨项目执行器、标准报告输出和历史回归检测。zigtester 目标是成为一个可被每个项目复用的 Python 自动测试框架，通过标准化配置文件自动扫描并执行单元测试、功能测试和性能测试（压力测试并入性能测试，作为其长时持续 + 资源趋势形态）。
 
 ## 设计原则
 
@@ -130,14 +130,16 @@ levels:
         latency_p99_ms:
           max: 500
           
-  stress:
-    - name: "concurrency-stress"
-      command: "python3 tests/test_bench.py --mode all -c 50 -n 1000"
-      timeout: 300
-      resource_limits:        # 资源上限
-        memory_mb: 200
-        fd_count: 500
-        cpu_percent: 80
+  # 长时持续 + 资源趋势（原 stress 层并入性能层，压力=性能测试的长时形态）。
+  # 长时套件同样放在 performance 层下，加 per_suite_only: true 禁止混入全量：
+  #   - name: "bench-long"
+  #     command: "python3 tests/test_stress.py -d 120"
+  #     timeout: 300
+  #     per_suite_only: true
+  #     resource_limits:        # 资源上限
+  #       memory_mb: 200
+  #       fd_count: 500
+  #       cpu_percent: 80
 ```
 
 ## CLI 接口
@@ -153,7 +155,7 @@ levels:
   zigtester init [--dir <path>]         为项目生成初始 zigtester.yaml
 
 run 选项：
-  --level unit|functional|performance|stress|all  测试层级（默认 all）
+  --level unit|functional|performance|all  测试层级（默认 all）
   --suite <name>                                  运行指定套件
   --all                                            运行所有已发现项目
   --report-format terminal|markdown|json           输出格式（默认 terminal）
@@ -173,7 +175,7 @@ run 选项：
 输出: {
   projects: [
     {name: "zigfoundation", path: "...", levels: ["unit"]},
-    {name: "zigbox", path: "...", levels: ["unit","functional","performance","stress"]},
+    {name: "zigbox", path: "...", levels: ["unit","functional","performance"]},
   ]
 }
 ```
@@ -317,14 +319,14 @@ class ProjectConfig:
     project: str
     description: str = ""
     settings: ProjectSettings
-    levels: dict[str, LevelConfig]     # unit/functional/performance/stress
+    levels: dict[str, LevelConfig]     # unit/functional/performance
 
 # runner.py
 
 @dataclass
 class SuiteResult:
     suite_name: str
-    level: str                         # unit/functional/performance/stress
+    level: str                         # unit/functional/performance
     status: str                        # PASS/FAIL/SKIP/ERROR
     duration_ms: float
     exit_code: int | None
@@ -446,8 +448,7 @@ def check_regression(current: dict, history: list[dict],
       "properties": {
         "unit":        {"$ref": "#/$defs/level"},
         "functional":  {"$ref": "#/$defs/level"},
-        "performance": {"$ref": "#/$defs/level"},
-        "stress":      {"$ref": "#/$defs/level"}
+        "performance": {"$ref": "#/$defs/level"}
       }
     }
   },
@@ -560,7 +561,7 @@ zigtester 不是凭空设计，而是从 6 个兄弟项目的现有测试实践�
 |------|------|-------------------|
 | `TestResult` / `TestSuite` 类 | zigbox `tests/lib/report.py` | 直接复用其四状态模型 (PASS/FAIL/SKIP/ERROR) + 三路输出 |
 | `ZigboxProcess` 生命周期 | zigbox `tests/lib/zigbox.py` | 抽象为 `TestExecutor`，支持任意子进程的 start/stop/超时/日志 |
-| 4 层测试模型 | zigbox `tests/SKILL.md` | 标准化为 `unit/functional/performance/stress` |
+| 3 层测试模型 | zigbox `tests/SKILL.md` | 标准化为 `unit/functional/performance`（压力并入性能 = 分套件同层，长时套件 `bench-long-*` 经 `per_suite_only` 隔离） |
 | crypto-only → E2E 管道 | zigoutbounds `test_protocols.py` | 通过 `depends_on` 实现阶段间依赖 |
 | `benchmark.py` 指标提取 | zigoutbounds | 抽象为 `MetricExtractor` + 正则 pattern |
 | `zigbox.stat` 健康检查 | zigbox `test_all.py` | 抽象为 `ResourceMonitor`（psutil 后端） |

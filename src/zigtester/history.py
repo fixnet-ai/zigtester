@@ -324,6 +324,25 @@ def load_history(project: str, suite: str, n: int = 30) -> list[dict]:
     return records
 
 
+def list_suites(project: str) -> list[str]:
+    """列出项目已知套件名（从 runs 表 DISTINCT，按最近时间降序）。
+
+    用于 history 组视图：判断 suite 参数是精确套件名还是协议组名
+    （如 "direct" 对应 bench-tcp-direct / bench-stream-direct 等）。
+    """
+    db = _get_db()
+    pid = _resolve_project_id(db, project)
+    if pid is None:
+        return []
+    rows = db.execute(
+        """SELECT suite FROM runs
+           WHERE project_id = ?
+           GROUP BY suite ORDER BY MAX(timestamp) DESC""",
+        (pid,),
+    ).fetchall()
+    return [r["suite"] for r in rows]
+
+
 def list_projects() -> list[dict]:
     """列出所有已知项目（从 projects 表）。
 
@@ -489,7 +508,9 @@ def _is_metric_regression(
     if abs(pct_change) <= threshold_pct:
         return False
 
-    if any(kw in metric_name for kw in ("latency", "error", "failed", "duration")):
+    if any(kw in metric_name for kw in (
+        "latency", "error", "failed", "duration", "growth", "rss", "cpu",
+    )):
         return pct_change > 0
 
     if any(kw in metric_name for kw in ("throughput", "reqs", "rate", "passed", "total")):

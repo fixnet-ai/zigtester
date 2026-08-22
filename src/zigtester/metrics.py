@@ -30,6 +30,33 @@ _BENCH_PATTERNS: list[tuple[str, str]] = [
     (r"THROUGHPUT_MBPS=([0-9.]+)", "throughput_mbps"),
     (r"REQ_S=([0-9.]+)", "req_s"),
     (r"FAILED=([0-9]+)", "failed"),
+    # test_engine.py 并发扫描的资源采样（per-concurrency 内存/fd/CPU）:
+    (r"MEMORY_PEAK_MB=([0-9.]+)", "memory_peak_mb"),
+    (r"CPU_PCT=([0-9.]+)", "cpu_pct"),
+    (r"FD_PEAK=([0-9]+)", "fd_peak"),
+    # bench_long（长时持续 + 资源趋势，test_engine.py --long）单行 KEY=VALUE:
+    (r"DURATION_S=([0-9.]+)", "duration_s"),
+    (r"OK_REQ=([0-9]+)", "success_count"),
+    (r"ERRORS=([0-9]+)", "error_count"),
+    (r"ERROR_RATE=([0-9.]+)", "error_rate"),
+    (r"RSS_GROWTH_MB=(-?[0-9.]+)", "rss_growth_mb"),
+    (r"FD_GROWTH=(-?[0-9]+)", "fd_growth"),
+    (r"CPU_HEAD_PCT=([0-9.]+)", "cpu_head_pct"),
+    (r"CPU_TAIL_PCT=([0-9.]+)", "cpu_tail_pct"),
+    (r"SAMPLES=([0-9]+)", "samples"),
+    # 长时压测中文格式（zigbox/zigproxy test_stress.py，经此不依赖 yaml custom 也能入库）:
+    (r"总请求数:\s*([0-9]+)", "total_requests"),
+    (r"错误数:\s*([0-9]+)", "error_count"),
+    (r"失败:\s*([0-9]+)", "error_count"),
+    (r"错误率:\s*([0-9.]+)", "error_rate"),
+    (r"p99_ms:\s*([0-9.]+)", "latency_p99_ms"),
+    (r"rss_growth_mb:\s*(-?[0-9.]+)", "rss_growth_mb"),
+    (r"fd_growth:\s*(-?[0-9]+)", "fd_growth"),
+    (r"cpu_head_pct:\s*([0-9.]+)", "cpu_head_pct"),
+    (r"cpu_tail_pct:\s*([0-9.]+)", "cpu_tail_pct"),
+    (r"采样点数:\s*([0-9]+)", "samples"),
+    (r"并发连接:\s*([0-9]+)", "concurrency"),
+    (r"吞吐:\s*([0-9.]+)\s*conn/s", "conn_per_sec"),
 ]
 
 

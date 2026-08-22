@@ -175,7 +175,7 @@ def zigtester_scan(dir: str | None = None) -> dict:
 
 @mcp.tool()
 def zigtester_list(dir: str | None = None) -> dict:
-    """列出项目的全部测试套件（按 unit/functional/performance/stress 分组）。
+    """列出项目的全部测试套件（按 unit/functional/performance 分组）。
 
     运行测试前先用它确认：层级名、套件名、套件是否需要 sudo——
     zigtester_run 的 level/suite 参数必须与此处名称一致。
@@ -234,7 +234,7 @@ async def zigtester_run(
     - 单套件最小复现：suite 传套件名（自动含其依赖），比全量更快定位问题
 
     Args:
-        level: 测试层级 unit/functional/performance/stress/all，默认 all
+        level: 测试层级 unit/functional/performance/all，默认 all
         suite: 仅运行指定套件（名称先经 zigtester_list 查询），可选
         dir: 项目目录路径（或其任意子目录，自动向上查找 zigtester.yaml），默认当前目录
     """
@@ -295,7 +295,7 @@ async def zigtester_run(
             entry["setup_error"] = s.setup_error
         if s.teardown_error:
             entry["teardown_error"] = s.teardown_error
-        # 资源信息（仅 performance/stress）
+        # 资源信息（仅 performance）
         if s.resource_peak.sample_count > 0:
             entry["resource"] = {
                 "peak_memory_mb": s.resource_peak.peak_memory_mb,
@@ -339,13 +339,17 @@ def zigtester_history(
       统计 PASS 记录，环境破坏数据不污染）
     - flaky=true 表示近期 PASS/FAIL 反复翻转——该套件结果不稳定，
       单次运行不足为凭，需多次确认后再下结论
+    - suite 传**协议组名**（如 "direct"）时返回组视图：合并 bench-tcp-direct /
+      bench-stream-direct / bench-long-direct / bench-tcp-sweep-direct 的
+      全部历史（groups 字段按成员套件分组）——压力并入性能后按组查看趋势
 
     Args:
         project: 项目名（zigtester_scan 返回的 name）
-        suite: 套件名（zigtester_list 返回的名称）
+        suite: 套件名（zigtester_list 返回的名称）或协议组名
         limit: 返回记录数（默认 10）
     """
-    from .history import check_regression, detect_flaky, load_history
+    from .history import check_regression, detect_flaky, list_suites, load_history
+    from .reporter import performance_group
 
     records = load_history(project, suite, n=limit)
     current_metrics = records[0].get("metrics", {}) if records else {}
@@ -353,6 +357,15 @@ def zigtester_history(
 
     regressions = check_regression(current_metrics, records, current_resource=current_resource)
     flaky = detect_flaky(records)
+
+    # 组视图：suite 不在已知套件名中 → 按协议组名合并组内全部成员历史
+    # （精确套件名优先走单套件逻辑，兼容既有调用）
+    known = list_suites(project)
+    group_records: dict[str, list[dict]] | None = None
+    if suite not in known and known:
+        members = [s for s in known if performance_group(s) == suite]
+        if members:
+            group_records = {m: load_history(project, m, n=limit) for m in members}
 
     # 精简历史（只保留时间戳和指标）
     runs_out = []
@@ -364,7 +377,7 @@ def zigtester_history(
             "metrics": r.get("metrics", {}),
         })
 
-    return {
+    out: dict[str, Any] = {
         "project": project,
         "suite": suite,
         "flaky": flaky,
@@ -380,6 +393,20 @@ def zigtester_history(
             for reg in regressions
         ],
     }
+    if group_records is not None:
+        out["groups"] = {
+            member: [
+                {
+                    "timestamp": r.get("timestamp", ""),
+                    "status": r.get("status"),
+                    "duration_ms": r.get("duration_ms"),
+                    "metrics": r.get("metrics", {}),
+                }
+                for r in recs
+            ]
+            for member, recs in group_records.items()
+        }
+    return out
 
 
 @mcp.tool()

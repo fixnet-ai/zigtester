@@ -13,7 +13,7 @@ import yaml
 # ── 数据模型 ──────────────────────────────────────────────
 
 DEFAULT_TIMEOUT = 120
-VALID_LEVELS = ("unit", "functional", "performance", "stress")
+VALID_LEVELS = ("unit", "functional", "performance")
 VALID_PARSERS = ("zig_test", "line_count", "test_protocols", "bench", "custom")
 VALID_STATUSES = ("PASS", "FAIL", "SKIP", "ERROR")
 
@@ -452,10 +452,11 @@ levels:
   #     # teardown:                # 可选：测试后清理（失败/超时也会执行）
   #     #   kill: ["mock-server"]
 
-  # stress:
-  #   - name: "concurrency-stress"
-  #     command: "python3 tests/test_bench.py -c 50 -n 1000"
+  # performance 长时持续 + 资源趋势（原 stress 层并入性能层，压力=性能测试的长时形态）:
+  #   - name: "bench-long"
+  #     command: "python3 tests/test_bench.py --long --duration 40"
   #     timeout: 300
+  #     per_suite_only: true    # 长时套件仅允许 --suite 单跑，禁止混入 --level performance 全量
   #     resource_limits:
   #       memory_mb: 200
   #       fd_count: 500

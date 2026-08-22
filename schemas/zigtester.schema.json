@@ -52,8 +52,7 @@
       "properties": {
         "unit":        {"$ref": "#/$defs/level"},
         "functional":  {"$ref": "#/$defs/level"},
-        "performance": {"$ref": "#/$defs/level"},
-        "stress":      {"$ref": "#/$defs/level"}
+        "performance": {"$ref": "#/$defs/level"}
       },
       "additionalProperties": false
     }

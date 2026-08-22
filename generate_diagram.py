@@ -67,12 +67,11 @@ for proj_name, x, y in projects:
                            color=color_text, alpha=0.5)
     ax.add_artist(arrow)
 
-# Right section: Four Levels
+# Right section: Three Levels
 levels = [
     ('unit', 9.5, 7.3),
     ('functional', 11, 7.3),
     ('performance', 9.5, 5.9),
-    ('stress', 11, 5.9),
 ]
 
 for level_name, x, y in levels:
