@@ -61,15 +61,26 @@ class LifecycleHook:
 
 @dataclass
 class ResourceSnapshot:
-    """资源采样快照 — monitor.py 产出。"""
+    """资源采样快照 — monitor.py 产出(min/avg/peak)。"""
     pid: int = 0
     peak_memory_mb: float = 0.0
     avg_memory_mb: float = 0.0
+    min_memory_mb: float = 0.0
     peak_fd_count: int = 0
     avg_fd_count: float = 0.0
+    min_fd_count: int = 0
     peak_cpu_pct: float = 0.0
     avg_cpu_pct: float = 0.0
+    min_cpu_pct: float = 0.0
     sample_count: int = 0
+
+
+@dataclass
+class ResourceSampling:
+    """资源采集配置 — settings.resource_sampling。"""
+    interval_s: float = 0.2        # 采样间隔(秒)
+    leak_window_s: float = 30.0    # 泄漏判定前/后窗口宽(秒)
+    analyze_leak: bool = True      # 是否对长时(per_suite_only)套件算泄漏判定
 
 
 @dataclass
@@ -79,6 +90,7 @@ class ProjectSettings:
     build_command: str | None = None
     timeout_default: int = 120
     env: dict[str, str] = field(default_factory=dict)
+    resource_sampling: ResourceSampling = field(default_factory=ResourceSampling)
 
 
 @dataclass
@@ -97,6 +109,10 @@ class SuiteConfig:
     resource_limits: ResourceLimits | None = None
     setup: LifecycleHook | None = None
     teardown: LifecycleHook | None = None
+    # 资源采集透传字段(parse 时从 settings.resource_sampling + 套件覆盖落值)
+    sampling_interval_s: float = 0.2
+    analyze_leak: bool = False          # 框架泄漏判定(默认仅 performance+per_suite_only 自动开)
+    leak_window_s: float = 30.0
 
     @property
     def qualified_name(self) -> str:
@@ -229,7 +245,9 @@ def _parse_resource_limits(raw: dict | None) -> ResourceLimits | None:
     )
 
 
-def _parse_suite(raw: dict, global_settings: ProjectSettings) -> SuiteConfig:
+def _parse_suite(
+    raw: dict, global_settings: ProjectSettings, level: str = ""
+) -> SuiteConfig:
     """解析单个套件配置，全局设置作为默认值。"""
     timeout = raw.get("timeout", global_settings.timeout_default)
     # 合并全局 env 和套件 env（套件优先）
@@ -242,12 +260,22 @@ def _parse_suite(raw: dict, global_settings: ProjectSettings) -> SuiteConfig:
         for k, v in raw.get("thresholds", {}).items()
     }
 
+    per_suite_only = bool(raw.get("per_suite_only", False))
+    rs = global_settings.resource_sampling
+    suite_name = str(raw["name"])
+    # 泄漏判定默认: performance 层 + 长时套件(名字含 long,如 bench-long-*)自动开;
+    # 套件级显式 analyze_leak 优先。短时基准套件 metrics 保持干净(趋势噪音无意义)。
+    analyze_leak = raw.get(
+        "analyze_leak",
+        bool(level == "performance" and rs.analyze_leak and "long" in suite_name),
+    )
+
     return SuiteConfig(
         name=str(raw["name"]),
         command=_env_subst(str(raw["command"])),
         timeout=int(timeout),
         sudo=bool(raw.get("sudo", False)),
-        per_suite_only=bool(raw.get("per_suite_only", False)),
+        per_suite_only=per_suite_only,
         parser=str(raw.get("parser", "line_count")),
         depends_on=[str(d) for d in raw.get("depends_on", [])],
         env=env,
@@ -256,17 +284,26 @@ def _parse_suite(raw: dict, global_settings: ProjectSettings) -> SuiteConfig:
         resource_limits=_parse_resource_limits(raw.get("resource_limits")),
         setup=_parse_lifecycle_hook(raw.get("setup")),
         teardown=_parse_lifecycle_hook(raw.get("teardown")),
+        sampling_interval_s=rs.interval_s,
+        analyze_leak=bool(analyze_leak),
+        leak_window_s=float(raw.get("leak_window_s", rs.leak_window_s)),
     )
 
 
 def _parse_settings(raw: dict | None) -> ProjectSettings:
     if raw is None:
         return ProjectSettings()
+    rs_raw = raw.get("resource_sampling") or {}
     return ProjectSettings(
         work_dir=str(raw.get("work_dir", ".")),
         build_command=raw.get("build_command"),
         timeout_default=int(raw.get("timeout_default", DEFAULT_TIMEOUT)),
         env={str(k): str(v) for k, v in raw.get("env", {}).items()},
+        resource_sampling=ResourceSampling(
+            interval_s=float(rs_raw.get("interval_s", 0.2)),
+            leak_window_s=float(rs_raw.get("leak_window_s", 30.0)),
+            analyze_leak=bool(rs_raw.get("analyze_leak", True)),
+        ),
     )
 
 
@@ -292,7 +329,7 @@ def parse_config(path: str) -> ProjectConfig:
         suite_list = raw_levels.get(level_name, [])
         if suite_list is None:
             suite_list = []
-        suites = [_parse_suite(s, settings) for s in suite_list]
+        suites = [_parse_suite(s, settings, level_name) for s in suite_list]
         levels[level_name] = LevelConfig(suites=suites)
 
     plugins: list[PluginRef] = []

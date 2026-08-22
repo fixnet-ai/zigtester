@@ -43,6 +43,29 @@
           "type": "object",
           "description": "全局环境变量",
           "additionalProperties": {"type": "string"}
+        },
+        "resource_sampling": {
+          "type": "object",
+          "description": "资源采集配置（CPU/内存/fd 采样与泄漏判定）",
+          "properties": {
+            "interval_s": {
+              "type": "number",
+              "minimum": 0.05,
+              "default": 0.2,
+              "description": "采样间隔（秒）"
+            },
+            "leak_window_s": {
+              "type": "number",
+              "minimum": 1,
+              "default": 30,
+              "description": "泄漏判定前/后窗口宽（秒）"
+            },
+            "analyze_leak": {
+              "type": "boolean",
+              "default": true,
+              "description": "是否对长时（per_suite_only）套件算泄漏判定"
+            }
+          }
         }
       }
     },
@@ -126,6 +149,16 @@
             "fd_count": {"type": "integer", "minimum": 0},
             "cpu_percent": {"type": "number", "minimum": 0}
           }
+        },
+        "analyze_leak": {
+          "type": "boolean",
+          "description": "框架泄漏判定（覆盖默认：performance 层 + per_suite_only 自动开）"
+        },
+        "leak_window_s": {
+          "type": "number",
+          "minimum": 1,
+          "default": 30,
+          "description": "泄漏判定前/后窗口宽（秒），覆盖 settings.resource_sampling.leak_window_s"
         },
         "setup": {"$ref": "#/$defs/lifecycle_hook"},
         "teardown": {"$ref": "#/$defs/lifecycle_hook"}

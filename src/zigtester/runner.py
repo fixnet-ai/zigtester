@@ -156,7 +156,7 @@ class TestExecutor:
             monitor = ResourceMonitor()
 
             test_proc = self._start_process(cmd_parts, env, suite.sudo, work_dir)
-            monitor.start(test_proc.pid)
+            monitor.start(test_proc.pid, interval_s=suite.sampling_interval_s)
 
             stdout, stderr, exit_code = self._wait_with_timeout_proc(
                 test_proc, suite.timeout
@@ -192,6 +192,13 @@ class TestExecutor:
         combined = stdout + "\n" + stderr if stdout and stderr else (stdout or stderr)
         extractor = MetricExtractor(suite.parser, suite.metrics)
         result.metrics = extractor.extract(combined, exit_code)
+
+        # 泄漏判定由框架计算(脚本删除采样器后唯一来源) →
+        # rss_growth_mb/fd_growth 进 metrics,由既有 check_thresholds 判 FAIL
+        if suite.analyze_leak and monitor is not None and snapshot.sample_count >= 2:
+            leak = monitor.analyze_leak(window_s=suite.leak_window_s)
+            if leak:
+                result.metrics.update(leak)
 
         # 判断状态 — sudo 不可用时标记 SKIP 而非 FAIL
         if exit_code != 0 and _is_sudo_failure(stderr):
@@ -429,6 +436,25 @@ class TestExecutor:
                 p99 = p99_raw
         if p99 > 0:
             parts.append(f"p99={p99:.1f}ms")
+
+        # 吞吐: THROUGHPUT_MBPS= / 传输: X MB/s / 吞吐: X conn/s
+        mbps = m.get("throughput_mbps", 0)
+        if mbps > 0:
+            parts.append(f"{mbps:.1f}MB/s")
+        transfer = m.get("transfer_mb_per_sec", 0)
+        if transfer > 0:
+            parts.append(f"{transfer:.1f}MB/s")
+        cps = m.get("conn_per_sec", 0)
+        if cps > 0:
+            parts.append(f"{cps:.0f}conn/s")
+
+        # 泄漏判定指标（框架 analyze_leak 产出;脚本删除采样器后唯一来源）
+        rg = m.get("rss_growth_mb")
+        if rg is not None:
+            parts.append(f"rss_growth={rg}MB")
+        fg = m.get("fd_growth")
+        if fg is not None:
+            parts.append(f"fd_growth={fg}")
 
         if result.status == "PASS" and not parts:
             parts.append("exit=0")

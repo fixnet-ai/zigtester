@@ -224,11 +224,25 @@ def save_run(result: ProjectResult, project_id: str, project_path: str = "") -> 
 
     for suite in result.suites:
         metrics_json = json.dumps(suite.metrics, ensure_ascii=False)
+        # 保留旧 key 名(peak_memory_mb/peak_fd/peak_cpu_pct) → 旧回归/读取兼容;
+        # 新增 min/avg/sample_count/leak,min/avg 只展示不入回归
+        rp = suite.resource_peak
         resource_data = {
-            "peak_memory_mb": suite.resource_peak.peak_memory_mb,
-            "peak_fd": suite.resource_peak.peak_fd_count,
-            "peak_cpu_pct": suite.resource_peak.peak_cpu_pct,
+            "peak_memory_mb": rp.peak_memory_mb,
+            "avg_memory_mb": rp.avg_memory_mb,
+            "min_memory_mb": rp.min_memory_mb,
+            "peak_fd": rp.peak_fd_count,
+            "avg_fd": rp.avg_fd_count,
+            "min_fd": rp.min_fd_count,
+            "peak_cpu_pct": rp.peak_cpu_pct,
+            "avg_cpu_pct": rp.avg_cpu_pct,
+            "min_cpu_pct": rp.min_cpu_pct,
+            "sample_count": rp.sample_count,
         }
+        leak = {k: v for k, v in suite.metrics.items()
+                if k in ("rss_growth_mb", "fd_growth", "cpu_head_pct", "cpu_tail_pct")}
+        if leak:
+            resource_data["leak"] = leak
         resource_json = json.dumps(resource_data, ensure_ascii=False)
 
         db.execute(

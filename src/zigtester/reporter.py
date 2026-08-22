@@ -125,18 +125,18 @@ def group_performance_suites(
 
 
 def _fmt_resource(rp: "ResourceSnapshot") -> str:
-    """格式化资源快照为紧凑单行字符串。
+    """格式化资源快照为紧凑 min/avg/max 单行字符串。
 
     sample_count=0 时返回 "n/a"（psutil 未安装或采样失败），
-    与真零使用区分开。
+    与真零使用区分开。格式: mem min/avg/peakMB fd min/avg/peak cpu min/avg/peak%
     """
     if rp.sample_count == 0:
         return "n/a"
-    parts = [f"mem:{rp.peak_memory_mb:.0f}MB"]
+    parts = [f"mem {rp.min_memory_mb:.0f}/{rp.avg_memory_mb:.0f}/{rp.peak_memory_mb:.0f}MB"]
     if rp.peak_fd_count > 0:
-        parts.append(f"fd:{rp.peak_fd_count}")
+        parts.append(f"fd {rp.min_fd_count}/{rp.avg_fd_count:.0f}/{rp.peak_fd_count}")
     if rp.peak_cpu_pct > 0:
-        parts.append(f"cpu:{rp.peak_cpu_pct:.0f}%")
+        parts.append(f"cpu {rp.min_cpu_pct:.0f}/{rp.avg_cpu_pct:.0f}/{rp.peak_cpu_pct:.0f}%")
     return " ".join(parts)
 
 
@@ -382,13 +382,12 @@ class Reporter:
                 label = f"{mode}:{k}" if mode else k
                 print(f"      {_DIM}{label}={v}{_RESET}")
 
-        # 详细模式显示完整资源（峰值 + 均值）
+        # 详细模式显示完整资源（min/avg/peak）
         if self.verbose and suite.resource_peak.sample_count > 0:
             rp = suite.resource_peak
-            print(f"      {_DIM}mem: peak={rp.peak_memory_mb}MB "
-                  f"avg={rp.avg_memory_mb}MB | "
-                  f"fd: peak={rp.peak_fd_count} avg={rp.avg_fd_count:.0f} | "
-                  f"cpu: peak={rp.peak_cpu_pct}% avg={rp.avg_cpu_pct}%{_RESET}")
+            print(f"      {_DIM}mem: {rp.min_memory_mb:.0f}/{rp.avg_memory_mb:.0f}/{rp.peak_memory_mb:.0f}MB | "
+                  f"fd: {rp.min_fd_count}/{rp.avg_fd_count:.0f}/{rp.peak_fd_count} | "
+                  f"cpu: {rp.min_cpu_pct:.0f}/{rp.avg_cpu_pct:.0f}/{rp.peak_cpu_pct:.0f}%{_RESET}")
         elif self.verbose and suite.resource_peak.sample_count == 0:
             print(f"      {_DIM}res: n/a{_RESET}")
 
@@ -521,9 +520,16 @@ class Reporter:
                 "resource": {
                     "peak_memory_mb": s.resource_peak.peak_memory_mb,
                     "avg_memory_mb": s.resource_peak.avg_memory_mb,
+                    "min_memory_mb": s.resource_peak.min_memory_mb,
                     "peak_fd": s.resource_peak.peak_fd_count,
+                    "avg_fd": s.resource_peak.avg_fd_count,
+                    "min_fd": s.resource_peak.min_fd_count,
                     "peak_cpu_pct": s.resource_peak.peak_cpu_pct,
+                    "avg_cpu_pct": s.resource_peak.avg_cpu_pct,
+                    "min_cpu_pct": s.resource_peak.min_cpu_pct,
                     "sample_count": s.resource_peak.sample_count,
+                    "leak": {k: v for k, v in s.metrics.items()
+                             if k in ("rss_growth_mb", "fd_growth", "cpu_head_pct", "cpu_tail_pct")},
                 },
             }
             # 失败/错误套件附带失败用例行（数据源 stdout）

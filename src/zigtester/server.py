@@ -295,14 +295,25 @@ async def zigtester_run(
             entry["setup_error"] = s.setup_error
         if s.teardown_error:
             entry["teardown_error"] = s.teardown_error
-        # 资源信息（仅 performance）
+        # 资源信息（仅 performance;min/avg/peak + 框架泄漏判定）
         if s.resource_peak.sample_count > 0:
+            rp = s.resource_peak
             entry["resource"] = {
-                "peak_memory_mb": s.resource_peak.peak_memory_mb,
-                "avg_memory_mb": s.resource_peak.avg_memory_mb,
-                "peak_fd": s.resource_peak.peak_fd_count,
-                "peak_cpu_pct": s.resource_peak.peak_cpu_pct,
+                "peak_memory_mb": rp.peak_memory_mb,
+                "avg_memory_mb": rp.avg_memory_mb,
+                "min_memory_mb": rp.min_memory_mb,
+                "peak_fd": rp.peak_fd_count,
+                "avg_fd": rp.avg_fd_count,
+                "min_fd": rp.min_fd_count,
+                "peak_cpu_pct": rp.peak_cpu_pct,
+                "avg_cpu_pct": rp.avg_cpu_pct,
+                "min_cpu_pct": rp.min_cpu_pct,
+                "sample_count": rp.sample_count,
             }
+            leak = {k: v for k, v in s.metrics.items()
+                    if k in ("rss_growth_mb", "fd_growth", "cpu_head_pct", "cpu_tail_pct")}
+            if leak:
+                entry["resource"]["leak"] = leak
         suites_out.append(entry)
 
     elapsed = pr.finished_at - pr.started_at
