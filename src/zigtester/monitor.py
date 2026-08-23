@@ -4,6 +4,10 @@
 未声明时只采命令进程本身(pid)。不累加整个进程树(排除 python 包装/
 插件等非目标进程)。target 未匹配(目标进程启动期 / 配置错误)时跳过
 本次采样,不采命令进程——避免包装进程资源污染目标指标。
+
+坑:sudo 直跑套件(suite.sudo=True 前置 sudo,或命令自带 sudo → 双重 sudo)
+命令进程是 sudo 本身(rss≈0),必须声明 target 匹配真实被测二进制
+(如 zigtun 的 "sudo zig-out/.../zigtun-test"),否则采到 sudo 进程。
 """
 
 from __future__ import annotations

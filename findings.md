@@ -1,440 +1,72 @@
-# Findings & Decisions
-
-## Phase 9 调研与环境自检发现（2026-08-18）
-
-### 兄弟项目绕过入口清单（按风险排序）
-
-| 风险 | 项目 | 位置 | 问题 |
-|------|------|------|------|
-| 🔴 高 | zigoutbounds | tests/test_engine/test_engine.py:267-280 `start_standalone_singbox()` | sing-box 插件未运行时**自动拉起脱离插件管理的 sing-box**（唯一残留的自动绕过通道） |
-| 🔴 高 | zigoutbounds | CLAUDE.md:102-106「方式 2/方式 3」、API.md:490-494、SKILL.md、README.md:30-35 | 文档明文授权手动 `sing-box run` 与 standalone 模式 |
-| 🔴 高 | zigbox | config/README.md:49, 83-95 | 「或直接调用 tests/ 脚本」6 条直跑命令 + 手动 `sing-box run` 指引 |
-| 🟡 中 | zigbox | tests/test_tun_scenarios.py:310-312 | FATAL 文案教手动 sudo 启动 local-echo |
-| 🟡 中 | zigtun | CLAUDE.md:123-127,164-170、README.md:83 | 「直接运行」与 zigtester 并列给出（未禁止） |
-| 🟡 中 | zigfoundation/zigdns | CLAUDE.md:138 / :95 | 「也可以直接 zig build test」措辞泛化授权 |
-| 🟡 中 | zigproxy | CLAUDE.md:83 | 「仅包含单元测试层级」过期（实际有 functional/perf/stress） |
-| 🟠 质 | zigdns | test_client.py:25 / test_forward.py:39 | detect-and-skip 后 `sys.exit(0)` — **绕过直跑得到假阳性全绿** |
-| 🟢 低 | 多项目 | zig-codegen.md:2098 | 教直接跑 `.zig-cache` 测试二进制（unit 级，破坏面小但措辞需收敛） |
-
-共性缺口：6 项目均无「禁止绕过 zigtester」强制条文；文档与 detect-and-error 脚本规范自相矛盾。
-
-### HTTP_PROXY 劫持 localhost API（重要 bug，2026-08-18）
-
-**现象**：sing-box 插件每次 `zigtester run` 后 3 秒内 exit 1（"sing-box API health check failed"），zigtester 自愈"成功"实为 serve 死亡前 3 秒窗口的假阳性（每 suite 前反复自愈循环）。
-
-**根因**：本机环境 `HTTP_PROXY=http://127.0.0.1:7890` 且 `no_proxy` 为空 → `requests.get("http://127.0.0.1:9090/version")` 被代理劫持 → health check 假失败 → singbox_ctl serve exit 1。TCP 层 9090 可连（zigtester ready_on 通过）但 HTTP 层失败。
-
-**修复**：`singbox_ctl.py` 模块级 `_http = requests.Session(); _http.trust_env = False`，所有 API 调用绕过代理环境变量。
-
-**教训**：任何访问 127.0.0.1 的 HTTP 客户端（requests/urllib）都必须禁用代理（`trust_env=False` 或 `proxies={"http": None}`），否则在有代理的开发机上必挂。zigoutbounds tests/lib/singbox.py 若用 requests/curl 检测 9090 也需同样处理。
-
-### 环境自检架构（PluginManager，2026-08-18）
-
-三层校验（verify_plugin）：
-1. 进程存活（proc.poll()）
-2. readiness 端口可连（ready_on TCP）
-3. **端口归属**：声明端口的占用者（lsof TCP LISTEN + UDP bound）必须含插件进程树成员（ps ppid 链上溯）；「可连但 lsof 不可见」= root 残留进程，同样异常
-
-自愈（ensure_ready → _heal）：stop（含 kill 名单）→ 等端口释放 → 重启 → 复检；失败 fast fail。
-
-残留识别安全规则（_plugin_proc_hints）：**只取 stop.kill 名单 + `*.py` 脚本名**作为 pkill 特征。绝不取解释器/子命令 — `python3` 会误杀 zigtester 自身，`serve` 会误杀任何含该词的进程。
-
-未知进程占用端口 → 不杀（防误杀），fast fail 报 PID + cmdline。
-
-prepare 阶段已知插件残留（如上一轮异常退出的 local-echo）→ 自动清理接管，无需人工干预（实测 PID 18973 场景）。
-
-### pkill/pgrep 自匹配陷阱（测试方法教训）
-
-测试脚本用 `pkill -f "local-echo --tcp-port"` 时，**外层 bash 命令行自身含该串** → pkill 杀了自己的 shell。规避：`pgrep -f "[l]ocal-echo --tcp-port"`（字符类正则使模式不匹配字面自身）。
-
-### Phase 9 验证中发现的流畅性摩擦点（2026-08-18，→ Phase 10）
-
-| # | 摩擦 | 亲历 | 处置 |
-|---|------|------|------|
-| 1 | **FAIL 时看不到失败用例名** — `✗ 用例名` 在 stdout，而 `--verbose` 只显示 metrics、`--json-output` 不含 stdout、MCP 只有 stderr_tail。zigproxy 14/17 挂时为拿 2 个用例名写脚本调内部 `run_project()` 花了数轮 | 是 | P10.1 |
-| 2 | **破坏性运行污染 history** — 杀 echo 的 238s 记录、fast fail 的 ERROR 全进了基线，性能回归检测的移动平均被拉歪 | 是 | P10.1 |
-| 3 | **自愈「死亡窗口假阳性」** — sing-box 代理 bug 期间每轮自愈"成功"均为 serve 死亡前 3 秒窗口的假象；结构性风险：ready_on 通过 ≠ 进程稳定 | 是 | P10.2 |
-| 4 | **flaky 无标注** — zigproxy burst（负载敏感）/zigdns FakeIP（缓存）同代码异结果，history 里表现为指标抖动无法辨识 | 是 | P10.1（检测）+ 项目内修根因 |
-| 5 | **并行一刀切降级浪费** — 多插件项目出现即全串行；无插件项目（zigfoundation/zigroute/zigunicfg）本可并行 | 是 | P10.2 |
-| 6 | **zigbox scenarios 依赖失联拖 238s**（正常 12s）— 脚本内部长重试不 fast fail | 是 | P10.3 |
-| 7 | **端口真相源分散 5 处** — zigtester CLAUDE.md / plugin.yaml ports / 四项目 tests/lib/config.py，改一处同步五处迟早漂移 | 是 | 遗留（后续独立任务） |
-| 8 | **zigroute/zigunicfg 未审计** — `--all` 跑出这两个已接入项目，但 Phase 9 只查了用户点名的 6 项目 | — | P10.4 |
-| 9 | **Go 客户端 HTTP_PROXY 隐患** — grpc-verify 等若用 net/http 默认 ProxyFromEnvironment，同 Python 坑 | 推测 | 遗留（提醒） |
-
-## Requirements
-
-- 用 zigtester MCP 替换兄弟项目（zigbox/zigoutbounds/zigfoundation/zigtun/zigproxy/zigdns）测试 skill 中的命令执行和结果解析内容
-- 保留不可替代的领域知识，迁移到各项目 CLAUDE.md
-- **zigbox 先行试点**，打磨流程后再推广；**zigoutbounds 暂缓**（重构中）
-
-## Research Findings
-
-### Skill 现状扫描
-- zigbox 有 2 个测试相关 skill：`tests`（~8K token）和 `zigbox-outbound-dev`（~1K token）
-- zigoutbounds 有 2 个测试相关 skill：`tests`（~5K token）和 `outbound-dev`（~4K token）
-- zigfoundation 无测试 skill（仅 zig/ 语言 skill）
-- zigtun/zigproxy/zigdns 无测试 skill
-- 4 个 skill 合计约 18K token 每次加载成本
-
-### zigtester MCP 能力矩阵
-- 已实现：`zigtester_list`、`zigtester_run`、`zigtester_scan`、`zigtester_history`
-- `zigtester_run` 支持 `--report-format markdown|json|terminal`
-- `zigtester_list` 按 level（unit/functional/performance）分组展示
-- `zigtester_history` 提供历史回归检测（当前 vs 历史移动平均）— skill 没有的新能力
-- `zigtester_scan` 跨项目发现 — skill 没有的新能力
-
-### 领域知识分类
-- **可自动化**（70%）：测试命令、输出格式、依赖排序、分层执行
-- **不可自动化**（30%）：VM TUN 调试警告（SSH 中断风险）、TUN 透明代理原则（curl/dig 不带参数）、协议开发 6 步流程、黄金法则"Go 先通，Zig 后写"、测试归属边界判断
-
-### zigbox 试点发现（2026-08-07）
-
-1. **TUN 警告已在 CLAUDE.md 中** — zigbox 的 CLAUDE.md § 测试方法已经包含了 VM TUN 调试警告和透明代理原则，无需迁移，只需补充归属边界表和 MCP 引用。
-
-2. **stub skill 仍需保留 TUN 警告摘要** — 虽然 CLAUDE.md 有完整版，但 stub skill 是测试入口，TUN 警告放在这里确保操作前一定看到（安全关键）。
-
-3. **实际节省超预期** — zigbox 试点 token 节省 -83%（预估 -75%），因为 zigbox-outbound-dev 直接删除了（不仅是精简）。
-
-4. **三层架构验证可行**：
-   - stub skill（2.2K）— MCP 速查 + 安全警告
-   - CLAUDE.md § 测试方法 — 领域知识（原则、边界、契约）
-   - zigtester.yaml — 执行定义（已存在，无改动）
-
-5. **stub skill 模板值得微调** — 试点后的 stub 结构（MCP 速查表 → 测试分层 → 安全警告 → 文档指针）清晰有效，可作为 Phase 2-4 的模板。
-
-### 测试流畅性根因分析（2026-08-07）
-
-zigoutbounds 全量测试（11 套件）中暴露了 5 个问题，根因不在被测代码，而在于 **zigtester 缺少测试环境生命周期管理**——没有 setup/teardown 钩子，没有 pre-flight 验证，没有 guaranteed cleanup。
-
-| # | 症状 | 表面修复 | 根因 |
-|---|------|---------|------|
-| 1 | 端口冲突 | 加端口检查 | 没有 pre-flight 验证 |
-| 2 | 僵尸进程 | 加清理脚本 | 没有 guaranteed teardown |
-| 3 | 超时不匹配 | 加参数覆盖 | setup/teardown 和 test 共用一个 timeout |
-| 4 | ~~UDP 就绪检测~~ | ~~写文档~~ | 不应由框架解决（测试脚本自身职责） |
-| 5 | 清理逻辑激进 | 写准则 | 没有结构化的 cleanup contract |
-
-**结论**：5 个问题指向同一个架构缺陷。真正的解决方案不是逐个修补，而是为 zigtester 增加 **生命周期钩子（setup/teardown）+ 插件体系**。
-
-### 测试基础设施寄生问题（2026-08-07）
-
-zigbox 的 `local-echo.zig`（1285 行）是一个 TCP echo + DNS echo 服务器，作为 zigbox 代理链测试的沙箱目标。它目前嵌在 zigbox 生产代码中，通过 `--local-echo` CLI flag 激活。
-
-这违反了关注点分离：测试基础设施不应寄生在生产代码中。local-echo.zig 的启动/停止/就绪检测完全符合 zigtester 插件的生命周期模型——它应该作为 zigtester 插件，由框架在测试前构建、启动，在测试后停止。
-
-**解决方案**：用 Python asyncio 重写为 `zigtester/plugins/local-echo/echo_server.py`（~450行），功能完整，零外部依赖。
-
-**关键设计决策**：
-- **Python 而非 Zig**：用户决策。跨平台更简单（无需编译），asyncio 高性能对性能测试结果影响最小
-- **DNS 端口 53 + SO_REUSEADDR**：绑定 `127.0.0.1:53` 而非 `0.0.0.0`，用 `SO_REUSEADDR` 与 macOS mDNSResponder（`*:53`）共存。sudo 必需
-- **非 root 自适应**：`ensure_echo_server()` 检测 euid，非 root 自动传 `--no-dns`（NOTUN 测试不需要 DNS）
-- **Python 3.14 asyncio 兼容**：`asyncio.start_server` 强制 Stream API → 用 `loop.create_server()` for Protocol API；双栈需分别绑定 `0.0.0.0` 和 `::`
-
-**变更规模**：
-| 仓库 | 新增 | 删除 | 净变化 |
-|------|------|------|--------|
-| zigbox | 96 行 | 1,483 行 | -1,387 行 (-93%) |
-| zigtester | 1,456 行 | 107 行 | +1,349 行 |
-
-**DNS 端口演变**：
-1. 初始：15353（避免 mDNSResponder 冲突）→ 用户指出应直接用 53
-2. 最终：53 + SO_REUSEADDR + 绑定 127.0.0.1（标准端口，无冲突）
-
-### macOS DNS 端口绑定发现（2026-08-07）
-
-macOS mDNSResponder 绑定 `*:53`（UDP + TCP，IPv4/IPv6）。即使 `sudo`，直接 `bind('127.0.0.1', 53)` 也会报 `EADDRINUSE`。
-
-**解决方案**：`SO_REUSEADDR` socket 选项。设置后即使 `*:53` 已被占用，仍可成功绑定 `127.0.0.1:53`。
-
-```python
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-sock.bind(('127.0.0.1', 53))
-```
-
-### zigoutbounds 测试脚本优化总结（2026-08-07）
-
-已在上游测试脚本中修复的问题（非 zigtester 本身）：
-- `SingboxProcess._wait_ready` 始终检查 8388 端口，对 Trojan(9443)/Hysteria2(10443) 无效 → 已加 `ready_port` 参数
-- 共享配置加载全部 5 个 inbound，无需的端口也被绑定 → 已加 `protocol_type` 参数按需过滤
-- benchmark.py Hysteria2 就绪检测为 `sleep(1.0)` → 改为 lsof UDP 检测
-- benchmark.py JSON 导出 hysteria2 误写 `trojan_port` key → 已修正
-- bench-hysteria2 超时 → zigtester.yaml 加 `--count 10`
-
-## Technical Decisions
-
-| Decision | Rationale |
-|----------|-----------|
-| 薄 skill + CLAUDE.md + zigtester.yaml 三层架构 | 分离"怎么跑"（MCP）、"为什么"（CLAUDE.md）、"跑什么"（zigtester.yaml） |
-| zigbox 先行试点，zigoutbounds 暂缓 | zigoutbounds 剧烈重构中，先打磨流程再推广 |
-| 先试点（Phase 1）而非全覆盖（原 Phase 1） | zigbox 已有 zigtester.yaml 可立即开始，试点经验指导后续 |
-| stub skill 保留项目特有操作警告 | TUN 调试警告无法被 MCP 自动化，必须保留人类可读的操作知识 |
-| zigbox-outbound-dev skill 完全删除 | 内容已被 zigbox tests skill 和 zigtester.yaml 覆盖 |
-| 领域知识进 CLAUDE.md 而非新 skill | CLAUDE.md 是项目固有文件，每次会话自动加载；避免创建新的 skill 碎片 |
-| 不删除现有测试脚本 | zigtester 是包装层，不是替换层 |
-| stub skill 保留 TUN 警告摘要（试点验证） | 安全关键信息必须在测试入口可见，不能仅靠 CLAUDE.md |
-
-### 试点后 stub skill 模板（已验证）
-
-```markdown
-# <项目> 测试 — zigtester MCP
-
-> 本项目已接入 zigtester 自动测试框架。
-> 领域知识见 `CLAUDE.md § 测试方法`。
-
-## MCP 速查
-| MCP 工具 | 用途 |
-|----------|------|
-| `zigtester_list("<project>")` | 列出所有测试套件 |
-| `zigtester_run("<project>")` | 运行全部测试 |
-| `zigtester_run("<project>", level="unit")` | 仅单元测试 |
-| `zigtester_history("<project>", "suite")` | 历史 + 回归检测 |
-
-## 测试分层
-（项目特有分层概述）
-
-## ⚠️ <项目特有操作警告>
-（安全关键信息，不可省略）
-
-## 相关文档
-| 文档 | 内容 |
-|------|------|
-| `CLAUDE.md § 测试方法` | 领域知识 |
-| `zigtester.yaml` | 测试套件定义 |
-```
-
-## Issues Encountered
-
-| Issue | Resolution |
-|-------|------------|
-| 尚无 | — |
-
-## Resources
-
-- `DESIGN.md` — zigtester MCP 优先架构设计文档
-- `schemas/zigtester.schema.json` — 配置文件 JSON Schema
-- `../zigfoundation/zigtester.yaml` — 单层级配置参考（unit only）
-- `../zigbox/zigtester.yaml` — 三层级配置参考（unit + functional + performance）
-- `../zigbox/.claude/skills/tests/SKILL.md` — **Phase 1 试点完成** — 精简为 stub（2.2K，-81%）
-- `../zigbox/.claude/skills/zigbox-outbound-dev/SKILL.md` — **Phase 1 已删除**
-- `../zigbox/CLAUDE.md` — **Phase 1 已更新** — § 测试方法补测试分层、归属边界、MCP 引用
-- `../zigoutbounds/.claude/skills/tests/SKILL.md` — Phase 4 待替换
-- `../zigoutbounds/.claude/skills/outbound-dev/SKILL.md` — Phase 4 待精简
-- `../zigbox/tests/lib/report.py` — TestResult/TestSuite 参考实现
-- `../zigbox/tests/SKILL.md` — 89K 权威测试文档（未改动）
-- create-tester skill — zigtester.yaml 交互式生成工具
-
-## sing-box 使用现状调研（2026-08-07）
-
-### 现有实现
-
-zigoutbounds 有 **3 个独立的 SingboxProcess 实现**，大量重复代码：
-
-| 文件 | 行号 | 特点 |
-|------|------|------|
-| `test_protocols.py` | 596-872 | 最完整：动态/共享双模式，UDP 检测，stderr dump |
-| `test_all_protocols.py` | 206-280 | 服务器 + 多客户端（每协议一个 SingboxProcess） |
-| `benchmark.py` | 265-471 | 三协议（SS2022/Trojan/Hy2），自签证书生成 |
-
-### 共同模式
-
-1. **启动**: 清理残留 → `sing-box run -c <tempfile>` → 轮询端口
-2. **配置**: 共享 JSON 文件（13 个）或代码 `json.dumps` 动态生成
-3. **就绪检测**: TCP `socket.create_connection`；UDP `lsof -iUDP`（macOS）/ `ss -uln`（Linux）
-4. **失败诊断**: 超时 drain stderr 最后 5 行
-5. **停止**: SIGTERM → wait 3-5s → SIGKILL → unlink 临时文件
-
-### 关键端口
-
-| 协议 | 端口 | 配置来源 |
-|------|------|---------|
-| mixed | 2080 | singbox_all_inbounds.json, singbox_test.json |
-| shadowsocks 2022 | 8388 | 动态生成 / singbox_test.json |
-| trojan | 9443 | singbox_test.json |
-| hysteria2 | 10443 | singbox_test.json / benchmark.py |
-| vmess | 16800 | singbox_all_inbounds.json |
-| vless | 16801 | singbox_all_inbounds.json |
-| hysteria2 (alt) | 16802 | singbox_all_inbounds.json |
-| tuic | 16803 | singbox_all_inbounds.json |
-
-### 遗留文件
-
-`notun_ss2022_test.json`、`tun_ss2022_udp_test.json`、`singbox_ss2022_udp_server.json` — 未被任何代码引用，仅用于手动 `sing-box run -c` 调试。
-
-### 设计决策
-
-| 决策 | 理由 |
-|------|------|
-| 用 REST API 热重载而非反复启停进程 | 一次启动，配置随意切换，消除端口冲突 |
-| 最小 base.json（仅 API + empty inbounds） | 不预设协议端口，由 suite 按需推送 |
-| 插件 config 字段声明默认端口 | 各项目定制独立端口，不硬编码 |
-| 先实现插件核心，后迁移测试脚本 | 渐进式，不破坏现有测试 |
-
-### sing-box REST API 关键信息
-
-- 配置 `experimental.clash_api.external_controller` 开启（**嵌套格式**，非扁平 `experimental.external_controller`）
-- `PUT /configs` 热重载（需完整配置，不是 patch）
-- `GET /version` 健康检查
-- 认证：`Authorization: Bearer <secret>`（可选）
-
-### sing-box 统一配置实现发现（2026-08-07）
-
-#### Clash API 不支持原生格式热重载
-
-`PUT /configs` 返回 HTTP 200/204 但实际**只接受 Clash 格式配置**，sing-box 原生格式（如 `shadowsocks`、`hysteria2`、`tuic`）通过 API 推送后端口不会出现。这是 sing-box Clash API 的设计限制，非 bug。
-
-**结论**：热重载不可行。serve 模式直接用 `test_server.json` 完整配置启动，需要切换配置时直接重启进程。
-
-#### 统一配置端口表
-
-合并了原 `singbox_test.json`（6 inbound）和 `singbox_all_inbounds.json`（6 inbound）：
-- 共享端口：mixed(2080), ss(8388), trojan(9443), vmess(16800), vless(16801), tuic(16803) — 6 个
-- singbox_test.json 独有：hysteria2(10443), dns-direct(5354) — 2 个
-- singbox_all_inbounds.json 独有：socks(2081), http(2082), hysteria2-alt(16802) — 3 个
-- experiment-hysteria2（已删除）：hysteria2-salamander(16804) — 1 个
-- 合计 12 inbound，0 端口冲突
-	- **后续简化 (2026-08-07)**：移除 socks(2081) 和 http(2082) — mixed:2080 已同时支持 SOCKS5+HTTP 代理。统一配置现为 10 inbound 双栈（`"listen": "::"`）。
-
-#### Hysteria2/TUIC 使用 UDP
-
-Hysteria2 和 TUIC 基于 QUIC 协议，使用 UDP 传输。端口检测时必须用 `lsof -iUDP`（macOS）或 `ss -uln`（Linux），`lsof -iTCP` 查不到这些端口。
-
-#### TLS 证书迁移
-
-证书从 zigoutbounds 迁移到 `plugins/sing-box/certs/`，使 sing-box 插件完全自包含，不依赖其他项目的文件路径。这避免了跨项目的隐式依赖。
-
-#### 无关项目分析结果
-
-- **zigbox**：测试直接连 echo server，不经过 sing-box。只有 zigoutbounds 用 sing-box。
-- **zigtun**：无 sing-box 依赖。
-- **experiment-hysteria2（已删除）**：手动测试脚本使用 sing-box，但无自动化测试。
-
-### TUN 测试迁移：zigtun vs zigbox 职责分离（2026-08-07）
-
-TUN 功能测试从 zigbox 迁移到 zigtun（TUN 组件库），实现关注点分离：
-
-- **zigtun**（TUN 库）：TUN 设备创建/路由/数据包 I/O 的功能验证 → `tests/test_tun.py` → `zig-out/bin/zigtun-test`
-- **zigbox**（编排层）：仅 NOTUN 模式自动化测试，TUN 手动调试保留在 `test_tun.py`
-
-**决策理由**：zigtun 是 TUN 设备的库实现，TUN 设备级别的功能测试（创建、路由、I/O）应在其自身项目中验证。zigbox 作为编排层，不需要重复验证 TUN 设备本身。
-
-### zigbox test_all.py 简化（NOTUN-only）
-
-移除内容：
-- `--tun`/`--notun` CLI 参数
-- `STAT_FILE`、`HEALTH_THRESHOLDS`、`STAT_MAX_AGE_SEC` 常量
-- `check_health()` 函数（仅 TUN 模式使用 zigbox.stat）
-- `enable_tun` 参数从 `start_zigbox()` 移除
-
-步骤从 1-6 简化为 1-5（移除健康检查步骤）。
-
-### Zig 0.16.0 编译陷阱（zigtun test_main.zig）
-
-在编写 `zigtun/src/test_main.zig` 时遇到的 Zig 0.16.0 编译问题：
-
-| 问题 | 原因 | 修复 |
-|------|------|------|
-| `var opts` should be const | 0.16.0 强制不可变变量为 const | `var` → `const` |
-| `std.process.argsAlloc` 不存在 | 0.16.0 IO 重构移除 | `std.process.Init.Minimal` + `init.args.toSlice(allocator)` |
-| `std.fs.cwd()` 不存在 | 0.16.0 IO 重构移除 | 移除文件 I/O，使用硬编码默认值 |
-| `.ipv4`/`.ipv6` 不存在 | 0.16.0 改为 `.ip4`/`.ip6` | 更新 switch 分支 |
-| `Ip4Address` 不是 `[4]u8` | 0.16.0 改为结构体 | 使用 `.bytes` 字段提取原始字节 |
-| `tun.createTun()` 是 stub | 实际实现在 `createTunPlatform()`（mod.zig 私有函数） | 将 `createTunPlatform` 改为 `pub`，同时导入 `tun.zig`（类型）和 `mod.zig`（函数） |
-| `catch \|err\| { }` 块返回 void | catch 块返回类型必须匹配成功负载类型 | 改用 `if/else` 解构 error union |
-
-### plugin.yaml `config:` 段被静默忽略 (2026-08-08)
-
-**问题**：`parse_plugin_config()` 解析 `plugin.yaml` 时没有读取 `config:` 段，导致 `PluginConfig.config` 始终为 `{}`。这意味着 `start_plugin()` 不会设置任何 `PLUGIN_*` 环境变量，插件的启动脚本只能靠自身硬编码默认值。
-
-**根因**：`parse_plugin_config()` 在两处 `return PluginConfig(...)` 中都没有包含 `config=...` 参数。`plugin.yaml` 中定义的 `config:` 段（如 sing-box 的 13 个默认端口配置）被 yaml.safe_load 解析后直接丢弃。
-
-**影响**：sing-box 插件启动时缺少 `PLUGIN_API_LISTEN`、`PLUGIN_ECHO_PORT`、`PLUGIN_SS_PORT` 等环境变量。虽然 singbox_ctl.py 有自身默认值，但 zigtester 完全失去了对插件端口配置的控制力。项目级 `zigtester.yaml` 中的插件配置覆盖也无法与默认配置合并。
-
-**修复**（`plugin.py` + `config.py`）：
-1. `parse_plugin_config()` — 读取 `config:` 段，通过 `config=config` 传入 `PluginConfig`
-2. `parse_config()` — `dict(p.get("config", {}))` → `dict(overrides) if isinstance(overrides, dict) else {}`，防御 YAML 中 `config: null` 导致的 TypeError
-
-**合并语义**：插件默认配置（`plugin.yaml` `config:`）→ 项目覆盖配置（zigtester.yaml 中 dict 格式插件的 `config:`）→ `PLUGIN_<KEY>` 环境变量
-
-### MCP stdio transport 多实例问题 (2026-08-08)
-
-**现象**：多次"重启"MCP Server 后，`ps aux | grep zigtester.server` 发现 3 个进程同时运行（不同 PID，不同启动时间）。旧进程没有被终止，每次重启只是增加新进程。
-
-**根因**：stdio transport 下 MCP Server 的生命周期由 Claude Code 管理——启动新进程和终止旧进程之间没有原子性保证。旧进程的 stdin 未关闭，继续阻塞在 `mcp.run()` 上等待输入，成为僵尸进程。
-
-**影响**：
-- MCP 调用可能连接到旧进程（未加载最新代码），导致 bug 修复看似"不生效"
-- 资源泄漏（每个 Python 进程 ~30MB）
-- 难以排查——错误行为取决于 MCP 路由到哪个进程
-
-**解决方案**：切换到 HTTP transport（`mcp.run(transport="http", host="127.0.0.1", port=9020)`）。端口绑定天然互斥——第二个实例启动时直接报 `Address already in use`，物理上不可能出现多实例。同时添加 PID 文件（`~/.zigtester/server.pid`）用于健康检查和优雅关闭追踪。
-
-**配置变更**（`~/.claude.json` 的 `mcpServers.zigtester`）：
-- 旧：`{"type":"stdio","command":"python3","args":["-m","zigtester.server"],"env":{...}}`
-- 新：`{"type":"http","url":"http://127.0.0.1:9020/mcp"}`
-
-## xray-core 集成发现（2026-08-10）
-
-### xray 进程 cwd 与证书相对路径冲突
-
-**现象**：渲染后的 xray 配置中 `certificates[0].certificateFile = "certs/localhost.crt"`（相对路径），启动 xray 时报：
-```
-Failed to start: main: failed to load config files > Failed to build TLS config > 
-failed to parse certificate > open /usr/local/bin/certs/localhost.crt: no such file or directory
-```
-
-**根因**：macOS brew 安装的 `/usr/local/bin/xray` 二进制被 OS 解析为绝对路径后，`subprocess.Popen(cwd=plugin.path)` 设置的 cwd 是插件目录，但 xray 进程**内部**仍以二进制所在目录（`/usr/local/bin`）为基准解析相对路径。这是 POSIX 进程行为的细微差异——`execve()` 不会改变 cwd，取决于父进程的设置。
-
-**解决方案**：在 `xray_ctl.py` 的 `_render_config_to_path()` 中渲染后立即扫描所有 inbound 的 `streamSettings.tlsSettings.certificates[*].certificateFile / keyFile`，将相对路径转为绝对路径（基于插件目录）。同一份渲染逻辑适用于 `plugin.yaml` 中声明的任何路径字段。
-
-**教训**：跨语言/跨进程调用时，**配置中所有路径必须绝对化**。即便父进程 cwd 正确，子进程（特别是被 OS 重定向到不同目录的二进制）可能按不同基准解析。
-
-### xray 无 REST API — 自建 readiness 探针
-
-**现象**：与 sing-box 内置 Clash API（`GET /version`、`PUT /configs`）不同，xray-core 进程**不暴露任何运行时 API**。无法用 HTTP 健康检查判定 xray 是否就绪。
-
-**根因**：xray-core 的设计哲学是"轻量代理核心"——所有管理功能（API/统计）都由用户态协议层提供（如 Xray API、gRPC 控制），非核心功能。这意味着 `xray run -c config.json` 启动后只有 listen 端口可观测。
-
-**解决方案**：在 `xray_ctl.py` 中启动独立线程跑轻量 TCP server（端口 9190）—— `socket.bind()` + `listen()` + `accept()` 循环。任何 TCP 连接即关闭都视为"xray 进程存活 + 探针线程存活"。zigtester `ready_on.type: tcp` 探针与原 sing-box 插件 1:1 对应。
-
-**教训**：插件 readiness 探针应选**最便宜的存活信号**——裸 TCP 优于 HTTP（前者少 50+ 行代码、少一次解析、少一层失败模式）。仅当需要传递额外信息（如版本号）时才用 HTTP。
-
-### 跨插件端口冲突的两层防御
-
-**现象**：两个插件同时声明同一端口（例如 sing-box 和 xray-core 都用 9090），会出现 bind: address already in use，启动失败但混乱（哪个先启动？哪个失败？怎么提示？）
-
-**解决方案**：两层防御——
-1. **YAML 错开约定**（人工层）：约定 xray 端口 = sing-box + 100，便于人工记忆
-2. **框架级冲突检测**（自动层）：`check_port_conflicts(plugins)` 在 `run_project()` 启动插件前对所有启用插件做静态检测，发现冲突直接拒绝启动（避免半启动状态）
-
-**关键设计**：冲突检测**阻塞所有插件启动**——而不是只跳过冲突的插件。如果只有 sing-box 启动而 xray 不启动，会让项目处于"部分参考实现就绪"的不一致状态，测试结果不可信。
-
-**教训**：多资源协作系统（多插件同时启动）的故障必须**整体回滚**，不能让部分先跑部分后跑。失败原语应该是原子的——要么全成功要么全失败。
-
-### Reality 协议跨实现不兼容
-
-**现象**：sing-box 的 Reality 与 xray-core 的 Reality 在私钥格式、握手协议、uTLS 指纹协商上有差异。共享同一组 UUID + privateKey 无法让两个服务端同时接受同一个客户端的连接。
-
-**根因**：Reality 是 v2ray-core (xray 前身) 发明的协议，sing-box 复刻时为了跨平台做了格式调整。xray 26.x 的 Reality 私钥用 x25519 标准格式，sing-box 1.11+ 用 base64 编码但长度/前缀不同。两个实现**不能互通同一组凭证**。
-
-**解决方案**：每个插件使用**完全独立**的 UUID/密码/Reality 私钥。客户端连接哪个实现就用对应的凭证。zigtester 插件层面保证两套凭证不冲突（命名空间隔离：`PLUGIN_VLESS_UUID` vs singbox 配置段）。
-
-**教训**：跨语言/跨实现复刻协议时，**永远不要假设凭证可移植**。即便是同一协议族（VLESS/Reality/VMess），不同实现的"细节差异"足以让一份凭证作废。每个实现保留独立凭证，命名上明确前缀（`SB_VLESS_UUID` / `XRAY_VLESS_UUID`），避免后续维护者混淆。
-
-## MCP 长任务超时根因（2026-08-21）
-
-**现象**：`zigtester_run` 跑 Performance 全量（多持续套件）时，报「Performance 全量超过 MCP 调用超时上限」，异步测试无法进行。
-
-**根因**：`server.py` 用 `json_response=True`。mcp SDK `streamable_http.py` 在该模式下（`is_json_response_enabled` 分支）**吞掉所有 notifications（含 progress）**，只在收到最终 `JSONRPCResponse` 才返回单 JSON——客户端（Claude Code）60s 内收不到首字节 → per-request 超时。
-
-**协议依据**：MCP 对长任务的官方解法是「progress 通知（`notifications/progress`）+ Streamable HTTP SSE 流」。progress 值 MUST 单调递增，即使无真实进度也要发（message 当心跳）。zigtester 两个都没用上。
-
-**修复**：
-1. `main()`：`json_response=False` → 走 SSE 分支，`EventSourceResponse` 立即发 priming event（首字节秒到）
-2. `zigtester_run`：async + `ctx: Context`，`run_project` 放 `asyncio.to_thread`，事件循环每 10s `ctx.report_progress(counter, None, f"tests running ({elapsed}s)")` 心跳
-
-**教训**：MCP 工具的默认 `json_response` 语义对长任务是陷阱——单 JSON 响应 = 首字节 = 最终结果 = 无进度。凡长任务工具必须 SSE 流 + progress 心跳，不能靠客户端调大 timeout 硬扛。
-
-## Visual/Browser Findings
-
--
+# 有效技术结论
+
+> 只保留仍然有效的技术结论；过程流水账已删除。与 [DESIGN.md](DESIGN.md) 冲突时以 DESIGN.md 为准。
+>
+> **二次瘦身（2026-08-23）**：① 技术定论均已下沉到对应代码头部/函数注释，此处只留「定论位置表」指针；
+> ② Zig 0.16 语言经验已移出（跨项目通用，交 zig-codegen 汇总，不在此重复）；③ 久远历史阶段
+> （Phase 1-12 过程）、被推翻结论、纯实验过程已删除。**本文件保留章节号（§X）供 task_plan
+> 历史总表跳转与 git 追溯。**
+
+## 定论位置表（技术定论已下沉代码注释，不在此重复正文）
+
+| 机制/定论 | 代码位置 |
+|-----------|---------|
+| MCP 长任务 SSE + progress 心跳（`json_response=False`） | `src/zigtester/server.py` `_run_with_progress` + `main()` |
+| HTTP transport（端口绑定互斥，杜绝多实例） | `src/zigtester/server.py` 模块头 |
+| 资源采集 `target` 字段（只采目标被测程序） | `src/zigtester/monitor.py` 模块头 + `_collect` |
+| per_suite_only（禁止 --level 全量压测） | `src/zigtester/runner.py` `run_project` + `config.py` |
+| PluginManager 三层校验（进程 + 端口 + 端口归属） | `src/zigtester/plugin.py` `verify_plugin` |
+| 自愈稳定期（死亡窗口假阳性） | `src/zigtester/plugin.py` `_HEAL_STABILITY_DELAY` |
+| 插件管道排空（防子进程 write 阻塞假死） | `src/zigtester/plugin.py` `_start_plugin_process` |
+| 插件 config 合并语义（默认 → 覆盖 → PLUGIN_* env） | `src/zigtester/plugin.py` `parse_plugin_config` |
+| 端口冲突两层防御（跨插件 + 系统占用，全阻塞） | `src/zigtester/plugin.py` `check_port_conflicts` |
+| HTTP_PROXY 劫持 localhost（ProxyHandler({})） | `plugins/sing-box/singbox_ctl.py` `_opener` |
+| xray 证书路径绝对化（cwd 错位） | `plugins/xray-core/xray_ctl.py` `_render_config_to_path` |
+| xray 裸 TCP readiness 探针（无 REST API） | `plugins/xray-core/xray_ctl.py` |
+| Clash API 不支持原生格式热重载 | `plugins/sing-box/singbox_ctl.py` `reload`（L457 注释） |
+| local-echo 统一 Go 实现 + 端口契约 | `plugins/local-echo/main.go` 头部 |
+
+## 最近关键定论（2026-08-18 → 08-23）
+
+### §8 target 字段资源采集（2026-08-23）
+
+只采目标被测程序（进程名匹配），未匹配跳过采样（不采命令进程），stop() 空快照 + warning 暴露配置错误。
+**sudo 双重坑**：命令自带 sudo → 双重 sudo，命令进程 = sudo 进程（rss≈0），必须 target 匹配真实
+被测二进制（zigtun `sudo zigtun-test` 直跑套件实证）。target 生效后资源绝对值变小，但泄漏判定
+（analyze_leak 趋势差分）仍有效。
+
+### §7 per_suite_only 字段（2026-08-22）
+
+套件级布尔禁止 `--level` 全量压测。zigoutbounds 25 套件全量 321.6s/6 FAIL → 全量 25 SKIP 2.3s +
+`--suite` 单跑。根因：schema 无任何字段可禁止 level 全量。
+
+### §6 MCP 长任务超时根因（2026-08-21）
+
+mcp SDK `json_response=True` 吞掉所有 progress 通知、只在最终 response 返回单 JSON → 客户端 60s
+per-request 首字节超时。修复 = `json_response=False`（SSE 流，priming event 立即发首字节）+
+async 工具 + `asyncio.to_thread` + 每 10s `report_progress` 心跳（progress 值 MUST 单调递增）。
+**教训**：凡长任务 MCP 工具必须 SSE + progress 心跳，不能靠客户端调大 timeout 硬扛。
+
+## 测试方法（仍有效，非代码）
+
+- **HTTP_PROXY 劫持 localhost**：任何访问 127.0.0.1 的 HTTP 客户端必须禁用代理，否则在有代理的开发机上必挂。
+- **pkill/pgrep 自匹配陷阱**：测试脚本 `pkill -f "local-echo --tcp-port"` 时外层 shell 命令行自身含该串
+  → 杀了自己。规避 `pgrep -f "[l]ocal-echo --tcp-port"`（字符类正则使模式不匹配字面自身）。
+- **echo 连接生命周期语义是下游协议隐式契约**：local-echo bench :13337 改为响应后 10ms idle 主动 FIN
+  → 暴露 zo 潜伏 UAF（relay/deinit 双 tun.close 竞态，zo 已修 tun_relayed）。此类行为变更落地后
+  应主动触发下游项目全量压测回归。
+- **单请求 / 全量铁律**：全链路 loopback 单请求 ≤100ms，超过当失败；全部功能+性能 1 分钟内跑完，
+  超过 = 失败止损修根因，禁止降级/排除。
+
+## 错误方向记录（勿再追）
+
+- **sing-box Clash API 热重载不可行** → serve 直接完整配置启动（`PUT /configs` 只接受 Clash 格式，原生格式热重载端口不出现）。
+- **xray Reality 凭证不可移植** → 与 sing-box Reality 私钥格式不兼容，各插件独立凭证（命名前缀区分）。
+- **MCP stdio transport 多实例僵尸进程** → 切 HTTP transport（端口绑定天然互斥，物理杜绝）。
+- **local-echo python 实现（echo_server.py）** → 2026-08-17 被 Go 单程序统一重写（替代 python + h2h3-echo 两进程）。
+
+## 遗留/观察（未修）
+
+- 端口真相源五处收敛（task_plan 遗留 #2）
+- Go 测试工具 HTTP_PROXY 隐患（task_plan 遗留 #3）
+- local-echo 极端满载启动偶发失败（task_plan 遗留 #4）
