@@ -216,6 +216,11 @@ lifecycle:
 
 local-echo 端口契约（各项目测试脚本共享，禁止项目脚本自行启停 echo server）：
 
+> **⚠️ 端口唯一真相源 = `plugins/*/plugin.yaml` config 段**。下表是文档快照，
+> 仅供速查；实际生效值以 plugin.yaml 为准——跨项目测试脚本一律经
+> `plugins/plugin_ports.py`（`echo_tcp_port()` / `singbox_port()` / `xray_port()` 等）
+> 派生，禁止各自硬编码。改端口只改 plugin.yaml config 段一处即可全生态生效。
+
 | 端口 | 协议 | 用途 |
 |------|------|------|
 | 13333 | TCP+UDP | 协议自适应 echo（SOCKS5/CONNECT/HTTP）+ UDP raw echo |

@@ -5,6 +5,8 @@ description: "xray-core 进程管理 — 与 sing-box 同结构/同端口错开�
 # 凭证（UUID/密码/私钥）与 sing-box 插件完全独立，互不影响。
 config:
   # 端口 — 与 plugins/sing-box/plugin.yaml 端口 +100 错开
+  # readiness 探针端口（xray_ctl.py 经 PLUGIN_READINESS_PORT 读取，与 ready_on/ports 一致）
+  readiness_port: 9190
   socks_port: 2180
   ss_port: 8488
   trojan_port: 9543
@@ -21,6 +23,7 @@ config:
   vmess_uuid: "e8b9a5b8-7c8a-4a87-b3f1-2e5d4a7c9b1a"
   trojan_password: "xray-trojan-password"
   ss_psk: "xP9kL2mN4qR8sT6vW1yB3dF5gH7jM0aC"
+  ss_method: "2022-blake3-aes-128-gcm"
 
   # Reality 凭证（与 sing-box Reality 不兼容，必须独立）
   # 私钥通过 `xray x25519` 生成；公钥保留供客户端出站配置参考

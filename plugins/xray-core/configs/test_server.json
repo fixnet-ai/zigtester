@@ -19,7 +19,7 @@
       "port": __SS_PORT__,
       "protocol": "shadowsocks",
       "settings": {
-        "method": "2022-blake3-aes-128-gcm",
+        "method": "__SS_METHOD__",
         "password": "__SS_PSK__"
       }
     },

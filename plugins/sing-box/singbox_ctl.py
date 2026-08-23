@@ -189,6 +189,123 @@ def _stderr_drain(proc: subprocess.Popen, label: str = "") -> str:
 
 
 # ============================================================================
+# 配置渲染（模板 __KEY__ 占位符 → 实际值；单一真相源 = plugin.yaml config）
+# ============================================================================
+#
+# configs/test_server.json 是模板：端口/凭证以 __UPPER_SNAKE__ 占位符引用
+# plugins/sing-box/plugin.yaml config 段（唯一权威）。渲染取值优先级：
+#   1) PLUGIN_* 环境变量（zigtester 插件启动时按 plugin.yaml 注入）
+#   2) plugin.yaml config 段（CLI 独立渲染 / 直跑时的兜底）
+# 两者同源于 plugin.yaml，结果必然一致；任何一侧缺键都显式报错，不静默。
+
+PLACEHOLDER_RE = re.compile(r"__([A-Z][A-Z0-9_]+)__")
+
+
+def _plugin_yaml_fallback_env() -> dict[str, str]:
+    """从 plugins/sing-box/plugin.yaml config 段生成模板 env（CLI 直调兜底）。
+
+    config 键大写后即模板占位符（mixed_port → __MIXED_PORT__，ss_psk →
+    __SS_PSK__），保证不依赖 zigtester 注入也能渲染出与插件启动一致的配置。
+    plugin_ports.py 缺失（插件目录未随版本同步）时返回空 dict —— 模板若含
+    未定义占位符会在 _render_config 中显式报错，不会静默产出残缺配置。
+    """
+    plugins_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if plugins_dir not in sys.path:
+        sys.path.insert(0, plugins_dir)
+    try:
+        import plugin_ports
+    except ImportError:
+        logger.warning(
+            "[sing-box] plugin_ports.py 缺失 — 渲染仅依赖 PLUGIN_* 环境变量"
+        )
+        return {}
+    cfg = plugin_ports.load_plugin("sing-box").get("config", {})
+    env = {k.upper(): str(v) for k, v in cfg.items() if v is not None}
+    # local-echo 端口（shadowtls/reality handshake 目标 TLS echo、route override 的
+    # stream echo）不在 sing-box plugin.yaml 中，但模板 __ECHO_TLS_PORT__ /
+    # __ECHO_STREAM_PORT__ 需要它们——直接从 local-echo 插件权威源派生，
+    # 保证改 local-echo 端口只动 plugins/local-echo/plugin.yaml 一处。
+    env["ECHO_TLS_PORT"] = str(plugin_ports.echo_tls_port())
+    env["ECHO_STREAM_PORT"] = str(plugin_ports.echo_stream_port())
+    return env
+
+
+def _plugin_env_to_template_env(plugin_env: dict[str, str]) -> dict[str, str]:
+    """将 zigtester 注入的 PLUGIN_* 环境变量转换为模板 __KEY__ 形式。"""
+    out: dict[str, str] = {}
+    for k, v in plugin_env.items():
+        if k.startswith("PLUGIN_"):
+            out[k[len("PLUGIN_"):]] = v
+    return out
+
+
+def _render_config(template_path: str, env: dict[str, str]) -> str:
+    """替换 JSON 模板中的 __KEY__ 占位符；引用未定义键即报错（不静默）。"""
+    with open(template_path, "r", encoding="utf-8") as f:
+        raw = f.read()
+
+    def _repl(m: re.Match) -> str:
+        key = m.group(1)
+        val = env.get(key)
+        if val is None:
+            raise ValueError(f"config template references undefined variable: {key}")
+        return val
+
+    return PLACEHOLDER_RE.sub(_repl, raw)
+
+
+def _absolutize_cert_paths(config: dict, base_dir: str) -> None:
+    """将 inbound.tls 的 certificate_path / key_path 转换为绝对路径（相对 base_dir）。
+
+    sing-box 进程 cwd 不一定是插件目录（CLI 直跑 / host 侧启动时），
+    必须用绝对路径才能找到 certs/ 下的证书。
+    """
+    for ib in config.get("inbounds", []):
+        tls = ib.get("tls")
+        if not isinstance(tls, dict):
+            continue
+        for key in ("certificate_path", "key_path"):
+            rel = tls.get(key)
+            if rel and not os.path.isabs(rel):
+                tls[key] = os.path.join(base_dir, rel)
+
+
+def _render_config_to_path(
+    template_path: str,
+    output_path: str,
+    extra_env: Optional[dict[str, str]] = None,
+    plugin_dir: Optional[str] = None,
+) -> None:
+    """从模板渲染完整 JSON 配置并写入目标路径（serve / render 共用）。
+
+    渲染后解析为 dict 校验 JSON 合法性，并把证书路径绝对化，再写回。
+    """
+    env = dict(_plugin_yaml_fallback_env())
+    env.update(_plugin_env_to_template_env(os.environ))
+    if extra_env:
+        env.update(extra_env)
+    rendered = _render_config(template_path, env)
+
+    # JSONC：模板含 // 注释（sing-box 支持），解析前先剥离
+    cleaned = re.sub(r'//.*$', '', rendered, flags=re.MULTILINE)
+    try:
+        config = json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"rendered config is not valid JSON: {e}\n--- rendered ---\n{rendered[:800]}"
+        )
+
+    if plugin_dir is None:
+        plugin_dir = os.path.dirname(os.path.dirname(os.path.abspath(template_path)))
+    _absolutize_cert_paths(config, plugin_dir)
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+        f.write("\n")
+    logger.info("[sing-box] config rendered: %s", output_path)
+
+
+# ============================================================================
 # SingboxController
 # ============================================================================
 
@@ -451,9 +568,11 @@ class SingboxController:
 # ============================================================================
 
 def _serve(args: argparse.Namespace) -> int:
-    """启动 sing-box 并阻塞直到收到停止信号。
+    """渲染模板 + 启动 sing-box 并阻塞直到收到停止信号。
 
-    直接用 server_config（test_server.json）启动，包含所有协议 inbound + API。
+    server_config（test_server.json）是模板：先经 _render_config_to_path
+    渲染（__KEY__ → plugin.yaml config 值）到 configs/.rendered.json，再以
+    渲染结果启动。包含所有协议 inbound + API。
     注意: sing-box Clash API 不支持原生格式热重载（仅接受 Clash 格式），
     需要切换配置时直接重启进程。
 
@@ -475,13 +594,24 @@ def _serve(args: argparse.Namespace) -> int:
         logger.error("[sing-box] server config not found: %s", server_config)
         return 1
 
-    ctl = SingboxController(api_addr=args.api_listen)
-    if not ctl.start(server_config, label="serve"):
+    # 渲染模板（__KEY__ 占位符 → plugin.yaml 值）到运行时路径，再启动
+    runtime_config = os.path.join(plugin_dir, "configs", ".rendered.json")
+    try:
+        _render_config_to_path(server_config, runtime_config, plugin_dir=plugin_dir)
+    except Exception as e:
+        logger.error("[sing-box] config render failed: %s", e)
         return 1
 
-    logger.info("[sing-box] %d inbounds ready on %s",
-                len(json.loads(re.sub(r'//.*$', '', open(server_config, encoding="utf-8").read(), flags=re.MULTILINE)).get('inbounds', [])),
-                args.api_listen)
+    ctl = SingboxController(api_addr=args.api_listen)
+    if not ctl.start(runtime_config, label="serve"):
+        return 1
+
+    try:
+        with open(runtime_config, "r", encoding="utf-8") as f:
+            n_inbounds = len(json.load(f).get("inbounds", []))
+    except Exception:
+        n_inbounds = 0
+    logger.info("[sing-box] %d inbounds ready on %s", n_inbounds, args.api_listen)
 
     # 阻塞等待停止信号
     stop_event = False
@@ -501,7 +631,39 @@ def _serve(args: argparse.Namespace) -> int:
         pass
     finally:
         ctl.stop()
+        # 清理运行时渲染产物（避免污染工作区/被误提交）
+        if os.path.exists(runtime_config):
+            try:
+                os.remove(runtime_config)
+            except OSError:
+                pass
 
+    return 0
+
+
+def _render(args: argparse.Namespace) -> int:
+    """render 模式：仅渲染模板到目标路径，不启动进程。供调试 / host 侧预渲染。"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [sing-box] %(levelname)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+
+    plugin_dir = os.path.dirname(os.path.abspath(__file__))
+    template = args.server_config
+    if not os.path.isabs(template):
+        template = os.path.join(plugin_dir, template)
+    output = args.output
+    if not os.path.isabs(output):
+        output = os.path.join(plugin_dir, output)
+
+    try:
+        _render_config_to_path(template, output, plugin_dir=plugin_dir)
+    except Exception as e:
+        logger.error("[sing-box] render failed: %s", e)
+        return 1
+
+    logger.info("[sing-box] rendered config: %s", output)
     return 0
 
 
@@ -511,15 +673,22 @@ def _main() -> int:
     )
     sub = parser.add_subparsers(dest="command")
 
-    # serve — 启动并阻塞（zigtester 插件用）
-    p_serve = sub.add_parser("serve", help="启动 sing-box 并阻塞（供 zigtester 插件调用）")
+    # serve — 渲染 + 启动并阻塞（zigtester 插件用）
+    p_serve = sub.add_parser("serve", help="渲染配置并启动 sing-box 后阻塞（供 zigtester 插件调用）")
     p_serve.add_argument("--api-listen", default=DEFAULT_API, help="API 监听地址，需与配置中一致 (默认: 127.0.0.1:9090)")
-    p_serve.add_argument("--server-config", default="configs/test_server.json", help="sing-box 配置路径")
+    p_serve.add_argument("--server-config", default="configs/test_server.json", help="sing-box 配置模板路径")
+
+    # render — 仅渲染（调试 / host 侧预渲染）
+    p_render = sub.add_parser("render", help="仅渲染配置模板到目标路径（调试/预渲染用）")
+    p_render.add_argument("--server-config", default="configs/test_server.json", help="sing-box 配置模板路径")
+    p_render.add_argument("--output", default="configs/.rendered.json", help="渲染输出路径")
 
     args = parser.parse_args()
 
     if args.command == "serve":
         return _serve(args)
+    elif args.command == "render":
+        return _render(args)
     else:
         parser.print_help()
         return 1

@@ -1,6 +1,22 @@
 name: local-echo
 description: "统一 Go echo 服务(2026-08-17 重做):TCP+UDP :13333 + bench :13337(短连接 10ms idle) + stream :13338(长连接无 idle) + h2 :13335 + h3 :13336 + DNS :5533(FakeIP)/:15353(real-map) + HTTP :18080 + TLS :18443 — 单程序高性能"
 
+# 端口真相源（生态级）: 本段是 local-echo 全部命名端口的唯一权威。
+# 各项目 tests/config.py 经 plugins/plugin_ports.py 从这里派生,禁止各自硬编码。
+# lifecycle.start.command 用 ${PLUGIN_<KEY>:-<默认>} 引用本段(zigtester 注入
+# PLUGIN_* 环境变量),保证运行命令与 config 段永不失步。
+config:
+  tcp_port: 13333        # TCP+UDP 协议自适应 echo
+  dns_port: 5533         # DNS echo (FakeIP, UDP)
+  real_dns_port: 15353   # DNS echo (real-map, UDP)
+  h2_port: 13335         # h2 echo (TCP)
+  h3_port: 13336         # h3 echo (UDP)
+  http_port: 18080       # HTTP echo (TCP)
+  tls_port: 18443        # TLS echo (TCP)
+  reality_tls_port: 18444  # reality steal dest TLS echo (TCP, 不受信证书)
+  bench_port: 13337      # bench 短连接 echo (TCP)
+  stream_port: 13338     # stream 长连接 echo (TCP)
+
 # 监听端口列表 — 用于 zigtester 端口冲突预检 + 每套件前环境自检（端口归属校验）
 ports:
   - 13333     # TCP+UDP 协议自适应 echo
@@ -18,7 +34,9 @@ build:
   command: "go build -o local-echo ."
 lifecycle:
   start:
-    command: "exec ./local-echo --host 127.0.0.1 --real-dns-answer-ip 127.0.0.1 --tcp-port 13333 --dns-port 5533 --h2-port 13335 --h3-port 13336 --http-port 18080 --tls-port 18443 --reality-tls-port 18444 --real-dns-port 15353 --bench-port 13337 --stream-port 13338 --cert certs/localhost.crt --key certs/localhost.key"
+    # 端口取自 config 段（zigtester 注入 PLUGIN_* 环境变量），${VAR:-默认} 兜底
+    # 独立手动运行。端口改一处（config 段）即可全生态生效。
+    command: "exec ./local-echo --host 127.0.0.1 --real-dns-answer-ip 127.0.0.1 --tcp-port ${PLUGIN_TCP_PORT:-13333} --dns-port ${PLUGIN_DNS_PORT:-5533} --h2-port ${PLUGIN_H2_PORT:-13335} --h3-port ${PLUGIN_H3_PORT:-13336} --http-port ${PLUGIN_HTTP_PORT:-18080} --tls-port ${PLUGIN_TLS_PORT:-18443} --reality-tls-port ${PLUGIN_REALITY_TLS_PORT:-18444} --real-dns-port ${PLUGIN_REAL_DNS_PORT:-15353} --bench-port ${PLUGIN_BENCH_PORT:-13337} --stream-port ${PLUGIN_STREAM_PORT:-13338} --cert certs/localhost.crt --key certs/localhost.key"
     timeout: 10
     ready_on:
       type: tcp

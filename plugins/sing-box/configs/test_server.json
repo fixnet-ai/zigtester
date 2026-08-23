@@ -1,12 +1,17 @@
-// sing-box 统一测试服务器配置
+// sing-box 统一测试服务器配置 — 模板
 //
 // 用途: 为 fixnet 生态所有项目的协议测试提供单一参考实现。
 //       合并了原 singbox_test.json 和 singbox_all_inbounds.json，
 //       两个 hysteria2 端口共存（10443 主 / 16802 副），消除端口冲突。
 //
+// 端口真相源: 本文件是「模板」, 所有大写下划线形式占位符运行前由 singbox_ctl.py 渲染
+//   （值来自 plugins/sing-box/plugin.yaml config 段 → PLUGIN_* 环境变量）,
+//   渲染结果写入 configs/.rendered.json 供 sing-box 启动。
+//   ⚠️ 端口/凭证唯一权威 = plugin.yaml config 段; 禁止直接改本模板里的数字。
+//
 // 使用方式:
-//   1. zigtester 插件自动启动
-//   2. 手动: cd plugins/sing-box && sing-box run -c configs/test_server.json
+//   1. zigtester 插件自动启动（内部先渲染）
+//   2. 手动: cd plugins/sing-box && python3 singbox_ctl.py render --server-config configs/test_server.json --output configs/.rendered.json && sing-box run -c configs/.rendered.json
 //   3. API: curl http://127.0.0.1:9090/version 或 curl http://[::1]:9090/version
 //
 // 双栈: 所有 inbound 统一 listen "::" — Linux 和 macOS 均可同时接受 IPv4/IPv6 连接。
@@ -15,44 +20,40 @@
 //       不支持原生格式热重载。需要切换配置时直接重启 sing-box。
 //
 // 插件互动架构:
-//   local-echo 插件 (TCP :13333, DNS :53)
+//   local-echo 插件 (TCP :13333, DNS :5533/:15353)
 //     ↑ direct outbound
-//   sing-box (本配置 — 10 协议 inbound，双栈 :: 同时支持 IPv4/IPv6)
+//   sing-box (本配置 — 18 协议 inbound，双栈 :: 同时支持 IPv4/IPv6)
 //     ↑ 各协议
 //   测试客户端 (zigbox/zigoutbounds ProtocolClient)
 //
-// 凭证（仅限本机开发测试，无生产价值）:
-//   SS2022 PSK:     cec3oZAgAaBi/F69ALSVgQ==
-//   Trojan 密码:     test-password
-//   Hysteria2 密码:  test-password / hysteria2-password
-//   VMess/VLESS UUID: 387b71a7-15ce-4ee0-a791-ab5a08aaa9dc
-//   TUIC 密码:       tuic-password
-//   Salamander:      salamander-password
+// 凭证（仅限本机开发测试，无生产价值）— 权威在 plugins/sing-box/plugin.yaml config:
+//   SS2022 PSK / Trojan 密码 / Hysteria2 密码 / VMess+VLESS UUID / TUIC / Salamander /
+//   ShadowTLS / AnyTLS / Reality 公私钥，全部经大写下划线占位符渲染。
 //
-// 端口分配:
-//   :2080  mixed       — SOCKS5 + HTTP 代理（已含两者，无需独立 socks/http inbound）
-//   :5354  direct(UDP) — DNS 转发 → 223.5.5.5:53
-//   :8388  shadowsocks — SS 2022 (2022-blake3-aes-128-gcm)
-//   :9443  trojan      — Trojan (TLS)
-//   :10443 hysteria2   — Hysteria2 (QUIC) 主端口
-//   :16800 vmess       — VMess (WebSocket)
-//   :16801 vless       — VLESS (TLS+XTLS)
-//   :16802 hysteria2   — Hysteria2 (QUIC) 副端口
-//   :16803 tuic        — TUIC v5 (QUIC)
-//   :16804 hysteria2   — Hysteria2 + Salamander 混淆
-//   :16805 vless+ws    — VLESS (TLS+WebSocket)
-//   :16806 trojan+ws   — Trojan (TLS+WebSocket)
-//   :16807 vless+grpc  — VLESS (TLS+gRPC)
-//   :16808 trojan+grpc — Trojan (TLS+gRPC)
-//   :16809 shadowtls   — ShadowTLS v3 (cover = local-echo TLS :18443; 解壳后 route override→
-//                        127.0.0.1:13338 回显, 供传输层真理源验证; ss 叠加形态按需另配)
-//                        注: 13338 = stream 纯字节 echo(无 idle close)——shadowtls-verify 需
-//                        二段写验证 HMAC 链连续性, 协议自适应 :13333 会包 HTTP 头并断连)
-//   :16810 shadowtls   — ShadowTLS v3 + SS 叠加 (cover 同上; 解壳后 route→ss-in :8388 解密,
-//                        客户端形态 = ss outbound + shadowtls transport)
-//   :16811 anytls      — AnyTLS (TLS + session mux; 默认 padding scheme)
-//   :16812 vless+reality — VLESS (REALITY + xtls-rprx-vision; handshake = local-echo TLS :18443;
-//                          private IOnE… public qKrVhendtxJFhOconW1F4GeEmKjXuJYZOsVLfkFZTxY)
+// 端口分配（占位符 → 值见 plugin.yaml config 段）:
+//   :__MIXED_PORT__  mixed       — SOCKS5 + HTTP 代理（已含两者，无需独立 socks/http inbound）
+//   :__DNS_DIRECT_PORT__  direct(UDP) — DNS 转发 → 223.5.5.5:53
+//   :__SS_PORT__  shadowsocks — SS 2022 (__SS_METHOD__)
+//   :__TROJAN_PORT__  trojan      — Trojan (TLS)
+//   :__HYSTERIA2_PORT__ hysteria2   — Hysteria2 (QUIC) 主端口
+//   :__VMESS_PORT__ vmess       — VMess (WebSocket)
+//   :__VLESS_PORT__ vless       — VLESS (TLS+XTLS)
+//   :__HYSTERIA2_ALT_PORT__ hysteria2   — Hysteria2 (QUIC) 副端口
+//   :__TUIC_PORT__ tuic        — TUIC v5 (QUIC)
+//   :__HYSTERIA2_SALAMANDER_PORT__ hysteria2   — Hysteria2 + Salamander 混淆
+//   :__VLESS_WS_PORT__ vless+ws    — VLESS (TLS+WebSocket)
+//   :__TROJAN_WS_PORT__ trojan+ws   — Trojan (TLS+WebSocket)
+//   :__VLESS_GRPC_PORT__ vless+grpc  — VLESS (TLS+gRPC)
+//   :__TROJAN_GRPC_PORT__ trojan+grpc — Trojan (TLS+gRPC)
+//   :__SHADOWTLS_PORT__ shadowtls   — ShadowTLS v3 (cover = local-echo TLS :18443; 解壳后 route override→
+//                       127.0.0.1:13338 回显, 供传输层真理源验证; ss 叠加形态按需另配)
+//                       注: 13338 = stream 纯字节 echo(无 idle close)——shadowtls-verify 需
+//                       二段写验证 HMAC 链连续性, 协议自适应 :13333 会包 HTTP 头并断连)
+//   :__SHADOWTLS_SS_PORT__ shadowtls   — ShadowTLS v3 + SS 叠加 (cover 同上; 解壳后 route→ss-in :__SS_PORT__ 解密,
+//                       客户端形态 = ss outbound + shadowtls transport)
+//   :__ANYTLS_PORT__ anytls      — AnyTLS (TLS + session mux; 默认 padding scheme)
+//   :__VLESS_REALITY_PORT__ vless+reality — VLESS (REALITY + xtls-rprx-vision; handshake = local-echo TLS :18443;
+//                        公私钥由 __REALITY_PRIVATE_KEY__ 渲染，公钥在 plugin.yaml config.reality_public_key)
 
 {
   "log": {
@@ -71,13 +72,13 @@
       "type": "mixed",
       "tag": "mixed-in",
       "listen": "::",
-      "listen_port": 2080
+      "listen_port": __MIXED_PORT__
     },
     {
       "type": "direct",
       "tag": "dns-in",
       "listen": "::",
-      "listen_port": 5354,
+      "listen_port": __DNS_DIRECT_PORT__,
       "network": "udp",
       "override_address": "223.5.5.5",
       "override_port": 53
@@ -86,19 +87,19 @@
       "type": "shadowsocks",
       "tag": "ss-in",
       "listen": "::",
-      "listen_port": 8388,
-      "method": "2022-blake3-aes-128-gcm",
-      "password": "cec3oZAgAaBi/F69ALSVgQ=="
+      "listen_port": __SS_PORT__,
+      "method": "__SS_METHOD__",
+      "password": "__SS_PSK__"
     },
     {
       "type": "trojan",
       "tag": "trojan-in",
       "listen": "::",
-      "listen_port": 9443,
+      "listen_port": __TROJAN_PORT__,
       "users": [
         {
           "name": "test-user",
-          "password": "test-password"
+          "password": "__TROJAN_PASSWORD__"
         }
       ],
       "tls": {
@@ -111,11 +112,11 @@
       "type": "hysteria2",
       "tag": "hysteria2-in",
       "listen": "::",
-      "listen_port": 10443,
+      "listen_port": __HYSTERIA2_PORT__,
       "users": [
         {
           "name": "test-user",
-          "password": "test-password"
+          "password": "__HYSTERIA2_PASSWORD__"
         }
       ],
       "tls": {
@@ -128,11 +129,11 @@
       "type": "vmess",
       "tag": "vmess-in",
       "listen": "::",
-      "listen_port": 16800,
+      "listen_port": __VMESS_PORT__,
       "users": [
         {
           "name": "test-user",
-          "uuid": "387b71a7-15ce-4ee0-a791-ab5a08aaa9dc",
+          "uuid": "__VMESS_UUID__",
           "alterId": 0
         }
       ]
@@ -141,11 +142,11 @@
       "type": "vless",
       "tag": "vless-in",
       "listen": "::",
-      "listen_port": 16801,
+      "listen_port": __VLESS_PORT__,
       "users": [
         {
           "name": "test-user",
-          "uuid": "387b71a7-15ce-4ee0-a791-ab5a08aaa9dc",
+          "uuid": "__VLESS_UUID__",
           "flow": ""
         }
       ],
@@ -159,11 +160,11 @@
       "type": "hysteria2",
       "tag": "hysteria2-alt-in",
       "listen": "::",
-      "listen_port": 16802,
+      "listen_port": __HYSTERIA2_ALT_PORT__,
       "users": [
         {
           "name": "test-user",
-          "password": "hysteria2-password"
+          "password": "__HYSTERIA2_ALT_PASSWORD__"
         }
       ],
       "tls": {
@@ -176,12 +177,12 @@
       "type": "tuic",
       "tag": "tuic-in",
       "listen": "::",
-      "listen_port": 16803,
+      "listen_port": __TUIC_PORT__,
       "users": [
         {
           "name": "test-user",
-          "uuid": "387b71a7-15ce-4ee0-a791-ab5a08aaa9dc",
-          "password": "tuic-password"
+          "uuid": "__TUIC_UUID__",
+          "password": "__TUIC_PASSWORD__"
         }
       ],
       "tls": {
@@ -195,11 +196,11 @@
       "type": "hysteria2",
       "tag": "hysteria2-salamander-in",
       "listen": "::",
-      "listen_port": 16804,
+      "listen_port": __HYSTERIA2_SALAMANDER_PORT__,
       "users": [
         {
           "name": "test-user",
-          "password": "hysteria2-password"
+          "password": "__HYSTERIA2_ALT_PASSWORD__"
         }
       ],
       "tls": {
@@ -209,18 +210,18 @@
       },
       "obfs": {
         "type": "salamander",
-        "password": "salamander-password"
+        "password": "__SALAMANDER_PASSWORD__"
       }
     },
     {
       "type": "vless",
       "tag": "vless-ws-in",
       "listen": "::",
-      "listen_port": 16805,
+      "listen_port": __VLESS_WS_PORT__,
       "users": [
         {
           "name": "test-user",
-          "uuid": "387b71a7-15ce-4ee0-a791-ab5a08aaa9dc",
+          "uuid": "__VLESS_UUID__",
           "flow": ""
         }
       ],
@@ -238,11 +239,11 @@
       "type": "trojan",
       "tag": "trojan-ws-in",
       "listen": "::",
-      "listen_port": 16806,
+      "listen_port": __TROJAN_WS_PORT__,
       "users": [
         {
           "name": "test-user",
-          "password": "test-password"
+          "password": "__TROJAN_PASSWORD__"
         }
       ],
       "tls": {
@@ -259,11 +260,11 @@
       "type": "vless",
       "tag": "vless-grpc-in",
       "listen": "::",
-      "listen_port": 16807,
+      "listen_port": __VLESS_GRPC_PORT__,
       "users": [
         {
           "name": "test-user",
-          "uuid": "387b71a7-15ce-4ee0-a791-ab5a08aaa9dc",
+          "uuid": "__VLESS_UUID__",
           "flow": ""
         }
       ],
@@ -281,11 +282,11 @@
       "type": "trojan",
       "tag": "trojan-grpc-in",
       "listen": "::",
-      "listen_port": 16808,
+      "listen_port": __TROJAN_GRPC_PORT__,
       "users": [
         {
           "name": "test-user",
-          "password": "test-password"
+          "password": "__TROJAN_PASSWORD__"
         }
       ],
       "tls": {
@@ -302,17 +303,17 @@
       "type": "shadowtls",
       "tag": "shadowtls-in",
       "listen": "::",
-      "listen_port": 16809,
+      "listen_port": __SHADOWTLS_PORT__,
       "version": 3,
       "users": [
         {
           "name": "test-user",
-          "password": "shadowtls-password"
+          "password": "__SHADOWTLS_PASSWORD__"
         }
       ],
       "handshake": {
         "server": "127.0.0.1",
-        "server_port": 18443
+        "server_port": __ECHO_TLS_PORT__
       },
       "strict_mode": true
     },
@@ -320,17 +321,17 @@
       "type": "shadowtls",
       "tag": "shadowtls-ss-in",
       "listen": "::",
-      "listen_port": 16810,
+      "listen_port": __SHADOWTLS_SS_PORT__,
       "version": 3,
       "users": [
         {
           "name": "test-user",
-          "password": "shadowtls-password"
+          "password": "__SHADOWTLS_PASSWORD__"
         }
       ],
       "handshake": {
         "server": "127.0.0.1",
-        "server_port": 18443
+        "server_port": __ECHO_TLS_PORT__
       },
       "strict_mode": true
     },
@@ -338,11 +339,11 @@
       "type": "anytls",
       "tag": "anytls-in",
       "listen": "::",
-      "listen_port": 16811,
+      "listen_port": __ANYTLS_PORT__,
       "users": [
         {
           "name": "test-user",
-          "password": "anytls-password"
+          "password": "__ANYTLS_PASSWORD__"
         }
       ],
       "tls": {
@@ -355,11 +356,11 @@
       "type": "vless",
       "tag": "vless-reality-in",
       "listen": "::",
-      "listen_port": 16812,
+      "listen_port": __VLESS_REALITY_PORT__,
       "users": [
         {
           "name": "test-user",
-          "uuid": "387b71a7-15ce-4ee0-a791-ab5a08aaa9dc",
+          "uuid": "__VLESS_UUID__",
           "flow": "xtls-rprx-vision"
         }
       ],
@@ -370,10 +371,10 @@
           "enabled": true,
           "handshake": {
             "server": "127.0.0.1",
-            "server_port": 18443
+            "server_port": __ECHO_TLS_PORT__
           },
-          "private_key": "IOnE23hYqeGgvJeXMpHDBEhVR5If8DFQxzGPu3b0uEc",
-          "short_id": ["0123abcd"]
+          "private_key": "__REALITY_PRIVATE_KEY__",
+          "short_id": ["__REALITY_SHORT_ID__"]
         }
       }
     }
@@ -399,13 +400,13 @@
         "inbound": ["shadowtls-in"],
         "outbound": "direct-out",
         "override_address": "127.0.0.1",
-        "override_port": 13338
+        "override_port": __ECHO_STREAM_PORT__
       },
       {
         "inbound": ["shadowtls-ss-in"],
         "outbound": "direct-out",
         "override_address": "127.0.0.1",
-        "override_port": 8388
+        "override_port": __SS_PORT__
       }
     ],
     "final": "direct-out"

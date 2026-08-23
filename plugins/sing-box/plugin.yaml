@@ -1,10 +1,16 @@
 name: sing-box
 description: "sing-box 进程管理 + REST API 热重载 — 统一管理代理测试依赖"
 
+# 端口/凭证真相源（生态级）: 本段是 sing-box 插件全部端口与凭证的唯一权威。
+# configs/test_server.json 是模板,运行前由 singbox_ctl.py 用 PLUGIN_* 环境变量
+# （即本段）渲染;各项目 tests/config.py / zigoutbounds tests/lib 经
+# plugins/plugin_ports.py 从这里派生,禁止各自硬编码。
 # 默认端口分配 — 项目可在 zigtester.yaml 中覆盖任意端口
 config:
   api_listen: "127.0.0.1:9090"
   echo_host: "127.0.0.1"
+  # 冗余引用：local-echo 插件 tcp_port 的副本，无消费方、无 __ECHO_PORT__ 占位符，
+  # 仅供文档提示 local-echo 所在端口；改动以 plugins/local-echo/plugin.yaml 为准。
   echo_port: 13333
   # 协议 inbound 端口
   mixed_port: 2080
@@ -17,6 +23,27 @@ config:
   hysteria2_alt_port: 16802
   tuic_port: 16803
   hysteria2_salamander_port: 16804
+  vless_ws_port: 16805
+  trojan_ws_port: 16806
+  vless_grpc_port: 16807
+  trojan_grpc_port: 16808
+  shadowtls_port: 16809
+  shadowtls_ss_port: 16810
+  anytls_port: 16811
+  vless_reality_port: 16812
+  # 凭证（与 configs/test_server.json 模板一一对应；渲染时经 PLUGIN_* 注入）
+  ss_psk: "cec3oZAgAaBi/F69ALSVgQ=="
+  ss_method: "2022-blake3-aes-128-gcm"
+  trojan_password: "test-password"
+  hysteria2_password: "test-password"
+  hysteria2_alt_password: "hysteria2-password"
+  vmess_uuid: "387b71a7-15ce-4ee0-a791-ab5a08aaa9dc"
+  vless_uuid: "387b71a7-15ce-4ee0-a791-ab5a08aaa9dc"
+  tuic_password: "tuic-password"
+  tuic_uuid: "387b71a7-15ce-4ee0-a791-ab5a08aaa9dc"
+  salamander_password: "salamander-password"
+  shadowtls_password: "shadowtls-password"
+  anytls_password: "anytls-password"
   # 阶段 14 reality 对照入站凭证（xray 侧独立，见 plugins/xray-core）
   reality_private_key: "IOnE23hYqeGgvJeXMpHDBEhVR5If8DFQxzGPu3b0uEc"
   reality_public_key: "qKrVhendtxJFhOconW1F4GeEmKjXuJYZOsVLfkFZTxY"
@@ -37,7 +64,9 @@ ports:
   - 16803     # tuic
   - 16804     # hysteria2 salamander
   - 16805     # vless-ws
-  - 16806     # vless-grpc
+  - 16806     # trojan-ws
+  - 16807     # vless-grpc
+  - 16808     # trojan-grpc
   - 16809     # shadowtls
   - 16810     # shadowtls+ss
   - 16811     # anytls
