@@ -38,9 +38,3 @@
 - **全量铁律**：全部功能+性能 1 分钟内跑完，超过 = 失败止损修根因，禁止降级/排除。
 - **端口契约**：local-echo 13333/5533/15353/13335/13336/18080/18443/13337/13338（见 CLAUDE.md）；
   sing-box / xray 端口表见 plugins/*/plugin.yaml。
-
-## 遗留跟踪
-
-- xray P8.3 cross-impl 对比套件未按原样落地（task_plan 遗留 #1，实际以 xray-core 插件 + 阶段14 REALITY 直连套件整合）
-- 端口真相源五处收敛（#2）；Go HTTP_PROXY 隐患（#3）；local-echo 极端满载启动偶发（#4）
-- Windows 侧 pkill / /tmp POSIX 假设 → zigbox #63（跨仓跟踪）

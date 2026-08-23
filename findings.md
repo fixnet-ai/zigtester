@@ -65,8 +65,6 @@ async 工具 + `asyncio.to_thread` + 每 10s `report_progress` 心跳（progress
 - **MCP stdio transport 多实例僵尸进程** → 切 HTTP transport（端口绑定天然互斥，物理杜绝）。
 - **local-echo python 实现（echo_server.py）** → 2026-08-17 被 Go 单程序统一重写（替代 python + h2h3-echo 两进程）。
 
-## 遗留/观察（未修）
+## 遗留观察（已迁 zigbox findings「跨项目技术背景」区）
 
-- 端口真相源五处收敛（task_plan 遗留 #2）
-- Go 测试工具 HTTP_PROXY 隐患（task_plan 遗留 #3）
-- local-echo 极端满载启动偶发失败（task_plan 遗留 #4）
+> 遗留观察项已迁 zigbox findings.md「跨项目技术背景」区。

@@ -6,7 +6,7 @@
 > （编号｜标题｜一句话结果｜锚点）。历史决策完整推导见 git log + DESIGN.md；
 > 同步二次瘦身：findings.md 440→72 行、progress.md 405→46 行（久远流水/错误方向已删，
 > 技术定论已在代码头部注释，findings 只留指针表）。**已删章节锚点一律以 git log 为准。**
-> 本文档只承载仍在生效的决策与未完成工作。
+> 本文档只承载仍在生效的决策；未完成任务已移交 zigbox 统一规划（zigbox task_plan.md『跨项目统一待办』）。
 
 ## 当前状态（2026-08-23）
 
@@ -29,7 +29,7 @@
 | 5 | 最终验证 | scan 全 6 项目 + `--all --level unit` 全绿；token 合计 -93% | git log |
 | 6 | 测试生命周期管理 | setup/teardown + readiness probe + 插件体系 + local-echo 迁移（Python→Go） | git log |
 | 7 | sing-box 插件 | 统一配置 test_server.json + serve 直启（Clash API 热重载不可行）+ 端口表 | git log + singbox_ctl.py |
-| 8 | xray-core 插件 | 插件本体 + 跨插件端口冲突检测；P8.3 zigoutbounds 接入见遗留待办 #1 | git log + xray_ctl.py |
+| 8 | xray-core 插件 | 插件本体 + 跨插件端口冲突检测；P8.3 zigoutbounds 接入见 zigbox task_plan.md『跨项目统一待办』 | git log + xray_ctl.py |
 | 9 | 环境统一治理 + pre-flight | PluginManager 三层校验 + 自愈 + fast fail + 生态铁律 | git log + plugin.py |
 | 10 | 测试流畅性改进 | failure_lines / flaky 检测 / 分组并行 / scenarios fast fail | git log |
 | 11 | flaky 根因修复 + 插件管道排空 | zigproxy 客户端超时缺陷 + zigdns FakeIP 期望 + PIPE drain | git log |
@@ -42,21 +42,6 @@
 - **MCP 长任务 = SSE 流 + progress 心跳**（`json_response=False`）；**HTTP transport 端口绑定天然互斥** 杜绝多实例僵尸进程。
 - **压测禁止 `--level` 全量**：`per_suite_only` 套件只允许 `--suite` 单独运行。
 - **资源采集 `target` 字段**：只采目标被测程序，未匹配跳过采样（防 python 包装进程污染）。
-
-## 遗留待办
-
-1. **Phase 8 P8.3 zigoutbounds xray 接入（原规划，需核实）** — 原计划 = `test_protocols.py` 加
-   xray 复用分支 + `--cross-impl` + zigtester.yaml 加 xray-* 套件。实际已以「xray-core 插件 +
-   阶段 14 REALITY 直连套件」形态整合（zigoutbounds `zigtester.yaml` 已引用 xray-core 插件，
-   含 xray-reality-verify / xray-reality-bench / xray-client-probe 等套件）。原
-   cross-impl 双参考实现对比（同协议同时打 sing-box 与 xray）未按原样落地；若仍需，后续补。
-2. **端口真相源五处收敛**（中工程量，涉及多项目脚本改造）— zigtester CLAUDE.md /
-   plugin.yaml ports / 各项目 tests/lib/config.py → plugin.yaml 单源。
-3. **Go 测试工具 HTTP_PROXY 隐患验证** — grpc-verify 等若用 net/http 默认 ProxyFromEnvironment，
-   同 Python 坑；遇「端口在听却连不上」先查此项。
-4. **local-echo 极端满载启动偶发失败观察**（未修）— 10 核 CPU spinner 满载下 4 次中 1 次 ERROR，
-   失败阶段未定位；复现时先查 `/tmp/zigtester-plugin-local-echo.log`。
-5. **Windows 侧框架遗留** — pkill / /tmp POSIX 假设已登记 zigbox #63（跨仓跟踪）。
 
 ## 测试门禁
 
