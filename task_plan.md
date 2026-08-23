@@ -488,3 +488,78 @@ zigoutbounds 用户要求「不要一次做全量压测，只能逐个协议做�
 - `zigtester run --level performance --suite bench-tcp-direct` → 单跑 1 套件 PASS（p99=11.4ms）
 - zigtester 自身单测：test_per_suite_only 4/4 + test_report_history 15/15 + test_env_guard 15/15
 - MCP 端（9020 server）待重启后 curl 验证 per_suite_only 字段下发
+
+---
+
+# Task Plan: 资源采集只采目标被测程序（target 字段）
+
+> **创建**: 2026-08-23
+> **状态**: ✅ 完成
+> **触发**: zigoutbounds 全量测试复盘——用户指出当前 monitor 采「测试命令整棵进程树」（python 包装 + test-engine 之和），要求**只采目标被测程序**（test-engine 进程自己），不含包装进程/插件进程。
+> **关联**: monitor.py / config.py / runner.py / 各项目 zigtester.yaml
+
+## Goal
+
+ResourceMonitor 的资源采集对象从「命令进程树（root + 全部递归子进程）」改为「**目标被测程序单进程**」。新增 suite 级 `target` 字段（进程名匹配），未声明时回退采命令进程（root 单进程）。
+
+## 方案
+
+1. `config.py`：SuiteConfig 加 `target: str | None = None`；`_parse_suite` 解析 `raw.get("target")`
+2. `monitor.py`：`start(pid, target=None)`；`_collect()` 目标筛选——
+   - `target` 已声明：进程树中按进程名（name/exe basename）匹配，**只采匹配进程**（全部匹配之和）
+   - `target` 已声明但树中无匹配 → **跳过本次采样**（目标进程启动期/配错），不采命令进程；整个套件始终未匹配则 stop() 空快照 + warning
+   - `target` 未声明 → 只采 root 单进程（命令进程本身）
+3. `runner.py`：`monitor.start(test_proc.pid, target=suite.target, ...)`
+4. 各项目 yaml：test_engine 驱动类 suite（test-engine-e2e / bench-tcp-* / bench-stream-* / bench-long-* / sweep）加 `target: test-engine`；h2/h3 e2e 加对应二进制名；verify 类（go run，进程名随机）不设 target → 回退单进程
+
+## 行为变化（历史基线影响）
+
+- 现有 suite 资源值将整体**变小**（整树 → 单进程）；泄漏判定（analyze_leak 前后窗口 RSS 差分）基于趋势，仍有效，但绝对值变小
+- zigoutbounds 的 test_engine 类 suite **必须加 target: test-engine**，否则采到的是 python 包装而非被测二进制
+
+## 步骤
+
+- [x] config.py SuiteConfig.target + _parse_suite
+- [x] monitor.py start(target) + _collect 目标筛选（未匹配跳过采样）
+- [x] runner.py 传 suite.target
+- [x] zigoutbounds zigtester.yaml 加 target（49 处：test-engine 46 + h3-e2e 2 + h2-e2e 1）
+- [x] zigtester 自身单测补 target 用例（test_target_monitor.py 5/5）
+- [x] 验证：bench-long-direct 只采 test-engine（psutil 实证 + 采集值吻合）
+
+## 验证结果（2026-08-23）
+
+**实证（psutil 独立探针采样同窗口 test-engine 进程）**：
+- test-engine 进程 RSS 全程 6.7→8.1MB（压测 10s 稳定 8.1MB，fd=24）
+- python 包装进程（test_engine.py）RSS = 33.6-34MB
+- monitor 首版（fallback root）报 peak=34MB → **实为 python 包装被误采**；avg=9.3（少数启动期样本污染）
+
+**根因发现（launchd.log fallback warning 实锤）**：test_engine.py 启动后需先导入库/解析配置才 Popen 启动 test-engine，**启动期 1-2s 内 target='test-engine' 在树中不存在** → 旧 fallback 逻辑采命令进程 root（python 34MB）污染 peak。
+
+**修复**：target 未匹配 → 跳过本次采样（`self._n_skipped=1` 推进启动期），不采命令进程；stop() 时 target 声明但 sample_count==0 → warning 暴露配置错误。单测 5/5（新增「目标延迟出现只采目标」用例）。
+
+**修复后 bench-long-direct**：peak 8.2 / avg 8.1 / min 7.8MB，peak_fd 24，peak_cpu 162% —— 与 psutil 实测完全吻合，launchd.log 无 fallback warning。
+
+## 遗留
+
+- ~~`schemas/zigtester.schema.json` 补 `target` 字段~~ ✅ 已补（2026-08-23）
+
+## 追加：兄弟项目 target 补齐（2026-08-23）
+
+用户质询「其他兄弟项目也自动适配了吗」→ 结论分两层：框架自动生效（不再整树），但 yaml target 声明需逐项目补。已为 5 个项目补 48 处：
+
+| 项目 | 套件 | target |
+|------|------|--------|
+| zigbox | bench-socks5/http/direct/long | `zigbox` |
+| zigdns | bench-alloc-v4/lookup-v4/alloc-v6/pool | `zigdns-harness` |
+| zigproxy | test-engine/-tun/-vtun | `test-engine` |
+| zigproxy | bench-socks5/http/long-conn | `zigproxy` |
+| zigtun | vtun-* 4 个 | `test-engine` |
+| zigtun | tun-*/sys-*/lwip-*/edge-*/monitor-*/routes-*/auto-*/strict-*/bridge-*/mixed-*/transparent/perf-nat/bench-*（27 个）| `zigtun-test` |
+| zigunicfg | test-engine-parse | `zigunicfg` |
+| zigunicfg | test-engine-adapt | `zigbox`（跨项目产物）|
+
+**关键坑**：命令经 `shlex.split` + 非 shell exec，suite.sudo=True 时前置 `sudo`；命令自带 `sudo` → 双重 sudo，**命令进程 = sudo**。zigtun 的 `sudo zig-out/.../zigtun-test` 直跑套件若不声明 target 会采 sudo 进程（rss≈0）——必须 target 匹配被测二进制。
+
+**实证**：zigdns bench-alloc-v4（探针对照）——target 生效采 `zigdns-harness`：peak 8/avg 7.8/min 4MB，cpu 97% 密集，与 psutil 探针实测（harness 5-8MB 爬升稳定）完全吻合。顺带修了 min=0 瑕疵（target 首次出现时仍走首样本跳过，不再采启动瞬间 rss≈0）。
+
+**未补 target 的 suite**（不启动独立被测二进制 或 未实证）：zigbox functional（scenarios 等）、zigproxy bench-direct（纯 python 直连）/protocols/doh、zigdns functional、zigunicfg ir-snapshots/gen。这些未声明 target → 采命令进程单进程（python），不混入插件。

@@ -107,6 +107,7 @@ class SuiteConfig:
     metrics: list[MetricDef] = field(default_factory=list)
     thresholds: dict[str, Threshold] = field(default_factory=dict)
     resource_limits: ResourceLimits | None = None
+    target: str | None = None    # 资源采集目标进程名（如 "test-engine"）；未声明时只采命令进程本身
     setup: LifecycleHook | None = None
     teardown: LifecycleHook | None = None
     # 资源采集透传字段(parse 时从 settings.resource_sampling + 套件覆盖落值)
@@ -282,6 +283,7 @@ def _parse_suite(
         metrics=metrics,
         thresholds=thresholds,
         resource_limits=_parse_resource_limits(raw.get("resource_limits")),
+        target=raw.get("target"),
         setup=_parse_lifecycle_hook(raw.get("setup")),
         teardown=_parse_lifecycle_hook(raw.get("teardown")),
         sampling_interval_s=rs.interval_s,

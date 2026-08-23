@@ -1,10 +1,20 @@
-"""资源监控 — 后台线程采样进程树 RSS/fd/CPU%。"""
+"""资源监控 — 后台线程采样目标进程 RSS/fd/CPU%。
+
+采集对象:suite 声明 target(进程名)时只采进程树中匹配该名的进程;
+未声明时只采命令进程本身(pid)。不累加整个进程树(排除 python 包装/
+插件等非目标进程)。target 未匹配(目标进程启动期 / 配置错误)时跳过
+本次采样,不采命令进程——避免包装进程资源污染目标指标。
+"""
 
 from __future__ import annotations
 
+import logging
+import os
 import threading
 import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from .config import ResourceLimits, ResourceSnapshot
 
@@ -17,15 +27,17 @@ except ImportError:
 
 
 class ResourceMonitor:
-    """后台线程监控进程树资源使用。
+    """后台线程监控目标进程资源使用。
 
-    启动后按配置间隔(默认 0.2s)采样整个命令进程树(测试脚本 + 被测二进制),
-    stop() 时返回 min/avg/peak 快照。analyze_leak() 基于时间序列做前后窗口
-    均值对比,判定 RSS/fd 泄漏趋势。无 psutil 时优雅降级返回空快照。
+    启动后按配置间隔(默认 0.2s)采样目标进程(suite 声明 target 时)或命令进程
+    本身(未声明时),stop() 时返回 min/avg/peak 快照。analyze_leak() 基于时间
+    序列做前后窗口均值对比,判定 RSS/fd 泄漏趋势。无 psutil 时优雅降级返回
+    空快照。
     """
 
     def __init__(self):
         self._pid: int | None = None
+        self._target: str | None = None
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
@@ -56,16 +68,20 @@ class ResourceMonitor:
 
     # ── 公开 API ───────────────────────────────────────────
 
-    def start(self, pid: int, interval_s: float = 0.2) -> None:
+    def start(self, pid: int, interval_s: float = 0.2, target: str | None = None) -> None:
         """启动后台采样线程。
 
         Args:
-            pid: 被测命令进程 PID(其进程树被递归采样)
+            pid: 被测命令进程 PID
             interval_s: 采样间隔(秒),来自 settings.resource_sampling.interval_s
+            target: 资源采集目标进程名(如 "test-engine")。声明时只采进程树中
+                匹配该名的进程(全部匹配之和);未声明时只采命令进程本身(pid),
+                不累加整个进程树。
         """
         if not _HAS_PSUTIL:
             return
         self._pid = pid
+        self._target = target
         self._interval_s = max(interval_s, 0.05)
         self._start_wall = time.perf_counter()
         self._stop_event.clear()
@@ -80,6 +96,16 @@ class ResourceMonitor:
 
         with self._lock:
             n = len(self._samples_memory)
+            if self._target and n == 0:
+                # 声明了 target 但整个套件期间从未匹配到目标进程:
+                # 配置错误(进程名不符)或目标从未启动。空快照 + warning 暴露,
+                # 避免资源全 0 被误读为「目标进程资源很小」。
+                logger.warning(
+                    "resource target %r never matched for command pid=%s; "
+                    "snapshot is empty (all samples skipped)",
+                    self._target,
+                    self._pid,
+                )
             return ResourceSnapshot(
                 pid=self._pid or 0,
                 peak_memory_mb=round(self._peak_memory_mb, 1),
@@ -153,6 +179,20 @@ class ResourceMonitor:
             self._procs[pid] = p
         return p
 
+    @staticmethod
+    def _proc_matches(proc: Any, target: str) -> bool:
+        """按进程名或可执行文件基名匹配目标程序。"""
+        try:
+            if proc.name() == target:
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return False
+        try:
+            exe = proc.exe()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return False
+        return bool(exe) and os.path.basename(exe) == target
+
     def _collect(self) -> None:
         if self._pid is None or not _HAS_PSUTIL:
             return
@@ -161,14 +201,30 @@ class ResourceMonitor:
         if root is None:
             return
 
-        # 进程树(含子进程);死进程从缓存清除
+        # 进程树(含子进程)
         try:
             children = root.children(recursive=True)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             children = []
         tree = [root] + children
-        live_pids = {p.pid for p in tree}
-        for pid in [k for k in self._procs if k != self._pid and k not in live_pids]:
+
+        # 目标进程筛选:target 声明 → 进程名匹配;未声明 → 只采命令进程本身(root)。
+        # 不累加整棵进程树(排除 python 包装 / 插件等非目标进程)。
+        if self._target:
+            targets = [p for p in tree if self._proc_matches(p, self._target)]
+            if not targets:
+                # 目标进程尚未出现(启动期,如 test-engine 由 python 包装延迟 Popen)
+                # 或配置错误:跳过本次采样,不采命令进程——否则 python 包装进程的
+                # RSS/fd 会混入目标资源(启动期 fallback 实测污染 peak)。
+                # 不推进首样本跳过标志:目标首次出现时仍走首样本跳过,避免进程
+                # 启动瞬间 rss≈0 的样本污染 min 基线(实测 harness rss 0→8MB 爬升)。
+                return
+        else:
+            targets = [root]
+
+        # 死进程从缓存清除(只保留当前目标进程)
+        live_pids = {p.pid for p in targets}
+        for pid in [k for k in self._procs if k not in live_pids]:
             self._procs.pop(pid, None)
             self._cpu_state.pop(pid, None)
 
@@ -178,7 +234,7 @@ class ResourceMonitor:
         total_cpu = 0.0
         ok = 0  # 成功读取的进程数
 
-        for p in tree:
+        for p in targets:
             try:
                 with p.oneshot():
                     mem = p.memory_info()
@@ -197,7 +253,7 @@ class ResourceMonitor:
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
-        # 进程树全部读取失败(已退出)时跳过本次采样:
+        # 目标进程全部读取失败(已退出)时跳过本次采样:
         # 死进程读取为 0 会污染 min/avg/peak 基线(mem min=0 失真根因)
         if ok == 0:
             return

@@ -150,6 +150,10 @@
             "cpu_percent": {"type": "number", "minimum": 0}
           }
         },
+        "target": {
+          "type": ["string", "null"],
+          "description": "资源采集目标进程名（如 test-engine）——只采进程树中匹配该名的进程，排除命令进程包装/插件；未声明时只采命令进程本身"
+        },
         "analyze_leak": {
           "type": "boolean",
           "description": "框架泄漏判定（覆盖默认：performance 层 + per_suite_only 自动开）"

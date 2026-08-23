@@ -156,7 +156,7 @@ class TestExecutor:
             monitor = ResourceMonitor()
 
             test_proc = self._start_process(cmd_parts, env, suite.sudo, work_dir)
-            monitor.start(test_proc.pid, interval_s=suite.sampling_interval_s)
+            monitor.start(test_proc.pid, interval_s=suite.sampling_interval_s, target=suite.target)
 
             stdout, stderr, exit_code = self._wait_with_timeout_proc(
                 test_proc, suite.timeout
