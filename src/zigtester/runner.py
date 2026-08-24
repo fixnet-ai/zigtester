@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import signal
 import subprocess
@@ -465,18 +466,64 @@ class TestExecutor:
 # ── 辅助函数 ──────────────────────────────────────────────
 
 def _build_cmd(suite: SuiteConfig) -> list[str]:
-    """将 command 字符串解析为命令列表。"""
+    """将 command 字符串解析为命令列表（先替换 ${VAR} 插件 env 引用）。"""
+    cmd = _subst_env_vars(suite.command, _build_env(suite))
     # 尝试 shlex 解析，失败则按空格分割
     try:
-        return shlex.split(suite.command)
+        return shlex.split(cmd)
     except ValueError:
-        return suite.command.split()
+        return cmd.split()
 
 
 def _build_env(suite: SuiteConfig) -> dict[str, str]:
-    """构建命令执行环境变量。"""
+    """构建命令执行环境变量（suite.env + 插件 PLUGIN_* 注入）。
+
+    插件端口/凭证经 plugins/*/plugin.yaml config 段派生为 PLUGIN_<KEY>，
+    命令串以 ${PLUGIN_<KEY>} 引用 — 改端口/凭证只改 plugin.yaml 一处（zt-2 收敛）。
+    suite.env / 调用方显式值优先（setdefault 不覆盖）。
+    """
     env: dict[str, str] = {}
     env.update(suite.env)
+    for key, value in _load_plugin_envs().items():
+        env.setdefault(key, value)
+    return env
+
+
+def _subst_env_vars(command: str, env: dict[str, str]) -> str:
+    """替换命令串中的 ${VAR}；env 未提供的 VAR 保留原样（避免误删）。"""
+    return re.sub(r"\$\{(\w+)\}", lambda m: env.get(m.group(1), m.group(0)), command)
+
+
+def _load_plugin_envs() -> dict[str, str]:
+    """从 plugins/*/plugin.yaml config 段派生命令串可用的 env（唯一真相源）。
+
+    生成两套命名，供命令串 ${VAR} 引用：
+      - PLUGIN_<KEY>        ：通用名（同名 key 多插件冲突时后者覆盖，仅限无歧义场景）
+      - <PLUGIN>_<KEY>      ：插件限定名（SINGBOX_/XRAY_/LOCALECHO_），跨插件同名
+                               key（如 vless_reality_port / reality_public_key）必须用它
+    缺失/损坏的插件配置不阻断测试（返回空 env，命令串 ${VAR} 保留原样
+    交由 shlex 拆分，与插件缺失导致的 ERROR 语义一致）。
+    """
+    env: dict[str, str] = {}
+    try:
+        plugins_dir = os.environ.get("ZIGTESTER_PLUGINS_DIR") or os.path.normpath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins")
+        )
+        if plugins_dir not in sys.path:
+            sys.path.insert(0, plugins_dir)
+        import plugin_ports as _pp  # noqa: PLC0415
+
+        for name, plugin_prefix in (
+            ("local-echo", "LOCALECHO"),
+            ("sing-box", "SINGBOX"),
+            ("xray-core", "XRAY"),
+        ):
+            cfg = _pp.load_plugin(name).get("config", {})
+            for key, value in cfg.items():
+                env[f"PLUGIN_{key.upper()}"] = str(value)
+                env[f"{plugin_prefix}_{key.upper()}"] = str(value)
+    except Exception:
+        pass
     return env
 
 

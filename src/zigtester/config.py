@@ -191,9 +191,13 @@ class Regression:
 # ── YAML 解析 ─────────────────────────────────────────────
 
 def _env_subst(value: str) -> str:
-    """替换字符串中的 ${VAR} 环境变量。"""
+    """替换字符串中的 ${VAR} 环境变量。
+
+    未定义的 VAR 保留原样（不替换为空）— 插件 env 注入在 runner 执行时进行
+    （_build_cmd 二次替换 ${PLUGIN_<KEY>}），配置解析阶段不强行清除。
+    """
     def _repl(m: re.Match) -> str:
-        return os.environ.get(m.group(1), "")
+        return os.environ.get(m.group(1), m.group(0))
     return re.sub(r"\$\{(\w+)\}", _repl, value)
 
 

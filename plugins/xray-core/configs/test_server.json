@@ -236,7 +236,7 @@
           ],
           "privateKey": "__REALITY_PRIVATE_KEY__",
           "shortIds": [
-            "0123abcd",
+            "__REALITY_SHORT_ID__",
             ""
           ]
         }

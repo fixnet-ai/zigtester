@@ -30,6 +30,7 @@ config:
   reality_public_key: "AS8ujQIlI5iRKq-rTQ-XJEhm6TldzVKo-GxENr6dMH8"
   reality_private_key: "YG2cUEJNf-tdCVG1L6VgsUUHwIPMR1swgeMgFnZoGXM"
   reality_server_names: "localhost,127.0.0.1"
+  reality_short_id: "0123abcd"
 
 # 插件监听的端口列表 — 用于 zigtester 跨插件端口冲突检测
 # 与 sing-box 插件端口 +100 错开（详见 plugin.yaml 中 config 字段）
