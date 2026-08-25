@@ -24,6 +24,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/md5"
 	"crypto/tls"
 	"encoding/binary"
@@ -34,6 +35,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -54,6 +56,13 @@ var chunkPool = sync.Pool{New: func() any { return make([]byte, 65536) }}
 var readerPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, 65536) }}
 
 const httpOkHeaderTpl = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nConnection: close\r\n\r\n"
+
+// httpKeepAliveHeaderTpl — keep-alive 响应头（客户端 Connection: keep-alive 复用连接）。
+// close 请求仍走 httpOkHeaderTpl（逐字节不变，含 CloseWrite + drain）。
+const httpKeepAliveHeaderTpl = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nConnection: keep-alive\r\n\r\n"
+
+// keepAliveIdleTimeout — keep-alive 连接空闲上限：客户端长时间不发下一条请求时关闭，防 goroutine 泄漏。
+const keepAliveIdleTimeout = 30 * time.Second
 
 // ═══════════════════════════════════════════════════════════════
 // TCP echo — 协议自适应
@@ -94,8 +103,8 @@ func handleTcp(conn net.Conn) {
 		echoMode(conn, r, rest, true)
 		return
 	}
-	// HTTP 请求:原文作为 response body,优雅关闭
-	writeHttpResponse(conn, data)
+	// HTTP 请求:原文作为 response body;keep-alive 请求连接复用,Connection: close 走原优雅关闭
+	handleHttpConnection(conn, r, data)
 }
 
 // mergeWithin — 短窗口合并后续数据段(QUIC 惰性首帧等分片场景:
@@ -235,7 +244,8 @@ func echoMode(conn net.Conn, r *bufio.Reader, first []byte, closeAfterEcho bool)
 		first = chunk[:n]
 	}
 	if startsWithMethodBytes(first) {
-		writeHttpResponse(conn, first)
+		// 隧道内 HTTP(CONNECT 隧道):keep-alive 请求复用一条隧道,Connection: close 走原优雅关闭
+		handleHttpConnection(conn, r, first)
 		return
 	}
 	conn.Write(first)
@@ -261,6 +271,102 @@ func writeHttpResponse(conn net.Conn, data []byte) {
 	}
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	io.Copy(io.Discard, conn) // drain 直到对端关闭
+}
+
+// requestWantsClose — 请求头 Connection 含 "close" → 走原 close 路径（writeHttpResponse）。
+// keep-alive 请求（HTTP/1.1 默认或显式 Connection: keep-alive）→ handleHttpConnection 复用。
+func requestWantsClose(head []byte) bool {
+	if idx := bytes.Index(head, []byte("\r\n\r\n")); idx >= 0 {
+		head = head[:idx] // 只扫头块
+	}
+	for _, line := range strings.Split(string(head), "\r\n") {
+		line = strings.TrimSpace(line)
+		if len(line) >= 11 && strings.EqualFold(line[:11], "connection:") {
+			if strings.Contains(strings.ToLower(line), "close") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// parseContentLength — 从请求头块解析 Content-Length（请求 body 边界）。
+func parseContentLength(header []byte) int {
+	for _, line := range strings.Split(string(header), "\r\n") {
+		line = strings.TrimSpace(line)
+		if len(line) >= 14 && strings.EqualFold(line[:14], "content-length:") {
+			v := strings.TrimSpace(line[14:])
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+				return n
+			}
+		}
+	}
+	return 0
+}
+
+// readCompleteHttpRequest — 从 reader 读完整请求（头 + Content-Length body）。
+// first = 已读到的首段（可能不足或含粘包后续）；循环补读直到 \r\n\r\n 后收足 Content-Length。
+// 返回 (请求全文, 剩余字节, ok)；EOF/错误 → ok=false。剩余字节 = 下一条请求的起始（粘包处理）。
+func readCompleteHttpRequest(r *bufio.Reader, first []byte) (req []byte, rest []byte, ok bool) {
+	buf := first
+	for {
+		if idx := bytes.Index(buf, []byte("\r\n\r\n")); idx >= 0 {
+			need := idx + 4 + parseContentLength(buf[:idx+4])
+			for len(buf) < need {
+				chunk := chunkPool.Get().([]byte)
+				n, err := r.Read(chunk)
+				chunkPool.Put(chunk)
+				if n > 0 {
+					buf = append(buf, chunk[:n]...)
+				}
+				if err != nil || n == 0 {
+					return nil, nil, false
+				}
+			}
+			return buf[:need], buf[need:], true
+		}
+		chunk := chunkPool.Get().([]byte)
+		n, err := r.Read(chunk)
+		chunkPool.Put(chunk)
+		if n > 0 {
+			buf = append(buf, chunk[:n]...)
+		}
+		if err != nil || n == 0 {
+			return nil, nil, false
+		}
+	}
+}
+
+// handleHttpConnection — keep-alive 连接循环：反复「读完整请求 → 200+原文响应」直到
+// 客户端要求关闭（Connection: close）/ EOF / 空闲超时。请求原文作为响应 body（同 writeHttpResponse 语义）。
+func handleHttpConnection(conn net.Conn, r *bufio.Reader, first []byte) {
+	data := first
+	for {
+		req, rest, ok := readCompleteHttpRequest(r, data)
+		if !ok {
+			return
+		}
+		if requestWantsClose(req) {
+			// 客户端要求关闭 → 原 close 路径（逐字节不变，含 CloseWrite + drain）
+			writeHttpResponse(conn, req)
+			return
+		}
+		conn.Write([]byte(fmt.Sprintf(httpKeepAliveHeaderTpl, len(req))))
+		conn.Write(req)
+		if len(rest) > 0 {
+			data = rest // 粘包：下一条已在剩余字节
+			continue
+		}
+		// 否则读下一条首段（设读 deadline 防空闲连接 goroutine 泄漏）
+		conn.SetReadDeadline(time.Now().Add(keepAliveIdleTimeout))
+		chunk := chunkPool.Get().([]byte)
+		n, err := r.Read(chunk)
+		chunkPool.Put(chunk)
+		if err != nil || n == 0 {
+			return // 对端关闭 / 空闲超时
+		}
+		data = chunk[:n]
+	}
 }
 
 func startsWithMethodBytes(data []byte) bool {
@@ -344,7 +450,6 @@ func handleUdp(conn *net.UDPConn) {
 
 var testDomains = []string{"echo.direct", "echo.proxy", "echo.block", "baidu.com", "google.com"}
 
-
 func isTestDomain(domain string) bool {
 	for _, d := range testDomains {
 		if domain == d || strings.HasSuffix(domain, "."+d) {
@@ -402,9 +507,9 @@ func parseDnsQuery(data []byte) *dnsQuery {
 
 func buildDnsResponse(packet []byte, query *dnsQuery, ips []net.IP) []byte {
 	resp := make([]byte, 0, 512)
-	resp = append(resp, packet[:12]...) // 复制头部
+	resp = append(resp, packet[:12]...)           // 复制头部
 	binary.BigEndian.PutUint16(resp[2:4], 0x8180) // QR+RD+RA
-	binary.BigEndian.PutUint16(resp[6:8], 1)       // ANCOUNT=1
+	binary.BigEndian.PutUint16(resp[6:8], 1)      // ANCOUNT=1
 	// 问题区:原样域名 + qtype/class
 	qoff := 12
 	for qoff < len(packet) {
@@ -420,14 +525,14 @@ func buildDnsResponse(packet []byte, query *dnsQuery, ips []net.IP) []byte {
 	for _, ip := range ips {
 		resp = append(resp, 0xC0, 0x0C)
 		if ip.To4() != nil {
-			resp = append(resp, 0x00, 0x01, 0x00, 0x01)         // A, IN
-			resp = append(resp, 0x00, 0x00, 0x00, 0x3C)         // TTL 60
-			resp = append(resp, 0x00, 0x04)                     // RDLEN 4
+			resp = append(resp, 0x00, 0x01, 0x00, 0x01) // A, IN
+			resp = append(resp, 0x00, 0x00, 0x00, 0x3C) // TTL 60
+			resp = append(resp, 0x00, 0x04)             // RDLEN 4
 			resp = append(resp, ip.To4()...)
 		} else {
-			resp = append(resp, 0x00, 0x1C, 0x00, 0x01)         // AAAA, IN
-			resp = append(resp, 0x00, 0x00, 0x00, 0x3C)         // TTL 60
-			resp = append(resp, 0x00, 0x10)                     // RDLEN 16
+			resp = append(resp, 0x00, 0x1C, 0x00, 0x01) // AAAA, IN
+			resp = append(resp, 0x00, 0x00, 0x00, 0x3C) // TTL 60
+			resp = append(resp, 0x00, 0x10)             // RDLEN 16
 			resp = append(resp, ip.To16()...)
 		}
 	}
