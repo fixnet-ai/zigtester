@@ -20,6 +20,9 @@ _BENCH_PATTERNS: list[tuple[str, str]] = [
     (r"p95:\s+([0-9.]+)(?!\s*ms)", "latency_p95_raw"),
     (r"p99:\s+([0-9.]+)(?!\s*ms)", "latency_p99_raw"),
     (r"错误:\s*([0-9]+)", "error_count"),
+    # zigbox 并发扫描机器行逐档 CPU%（--sweep-concurrency，#88 诊断"各协议 CPU
+    # 是否相同"；matrix 行格式不含 "CPU:" 不会误命中，单档套件不打印该字段）
+    (r"CPU:\s*([0-9.]+)%", "cpu_pct"),
     (r"成功:\s*([0-9]+)", "success_count"),
     (r"总计:\s*([0-9]+)", "total_requests"),
     # zigoutbounds test_engine.py bench 输出（KEY=VALUE 格式）:
@@ -261,19 +264,36 @@ class MetricExtractor:
         result: dict[str, float] = {
             "exit_code": float(exit_code),
         }
-        # 多档并发扫描：收集全部 bench-tcp 行及其并发档位
-        sweep: list[tuple[int, str]] = []
+        # 多档并发扫描：收集全部 MODE=... CONCURRENCY=N 机器行及其档位。
+        # 兼容 zigoutbounds bench-tcp（MODE=bench-tcp）与 zigbox 协议扫描
+        # （MODE=socks5/socks4/http/direct，#88）。多协议时按协议命名空间
+        # 隔离键 {key}_{mode}_c{N}（+ 各协议裸 {key}_{mode} 保留首档）；
+        # 单协议保持向后兼容键 {key}_c{N}（zigoutbounds 历史/阈值不受影响）。
+        sweep: list[tuple[str, int, str]] = []
         for line in stdout.splitlines():
-            m = re.search(r"MODE=bench-tcp CONCURRENCY=(\d+)", line)
+            m = re.search(r"MODE=([\w-]+) CONCURRENCY=(\d+)", line)
             if m:
-                sweep.append((int(m.group(1)), line))
-        if len({c for c, _ in sweep}) >= 2:
-            for c, line in sweep:
+                sweep.append((m.group(1), int(m.group(2)), line))
+        modes = {mode for mode, _, _ in sweep}
+        multi_mode = len(modes) > 1
+        # 多档判定：任一模式出现 ≥2 个不同档位
+        has_sweep = any(
+            len({c for md, c, _ in sweep if md == mode}) >= 2 for mode in modes
+        )
+        if has_sweep and sweep:
+            for mode, c, line in sweep:
                 for k, v in _bench_from_text(line).items():
-                    result[f"{k}_c{c}"] = v
-            # 裸 key 保留最小并发档（首档）作默认
-            first = min(sweep, key=lambda x: x[0])
-            result.update(_bench_from_text(first[1]))
+                    result[f"{k}_{mode}_c{c}" if multi_mode else f"{k}_c{c}"] = v
+            # 裸 key 保留各模式最小并发档（首档）作默认
+            for mode in modes:
+                rows = [(c, line) for md, c, line in sweep if md == mode]
+                first = min(rows, key=lambda x: x[0])
+                parsed = _bench_from_text(first[1])
+                if multi_mode:
+                    for k, v in parsed.items():
+                        result[f"{k}_{mode}"] = v
+                else:
+                    result.update(parsed)
             return result
         # 单档：re.search 对全 stdout 取首匹配（bench-tcp 行在 bench-udp 前 = TCP 数据）
         result.update(_bench_from_text(stdout))
