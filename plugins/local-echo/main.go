@@ -294,8 +294,8 @@ func requestWantsClose(head []byte) bool {
 func parseContentLength(header []byte) int {
 	for _, line := range strings.Split(string(header), "\r\n") {
 		line = strings.TrimSpace(line)
-		if len(line) >= 14 && strings.EqualFold(line[:14], "content-length:") {
-			v := strings.TrimSpace(line[14:])
+		if len(line) >= 15 && strings.EqualFold(line[:15], "content-length:") {
+			v := strings.TrimSpace(line[15:])
 			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 				return n
 			}
