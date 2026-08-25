@@ -26,6 +26,7 @@
 | Clash API 不支持原生格式热重载 | `plugins/sing-box/singbox_ctl.py` `reload`（L457 注释） |
 | local-echo 统一 Go 实现 + 端口契约 | `plugins/local-echo/main.go` 头部 |
 | 回归检测总量指标 duration 归一化（防 --duration 调整误报） | `src/zigtester/history.py` `_DURATION_SCALED_METRICS` + `_duration_of` + `check_regression` |
+| 回归检测基线三重过滤（2026-08-26）：短 duration 启动瞬态 / 陈旧记录时间窗口 / 延迟亚毫秒噪声 guard | `src/zigtester/history.py` `_is_short_duration` + `_is_stale` + `_is_latency_metric` + `check_regression` |
 
 ## 最近关键定论（2026-08-18 → 08-25）
 

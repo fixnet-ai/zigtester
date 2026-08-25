@@ -176,6 +176,71 @@ def test_regression_duration_missing_backward_compatible():
     assert len(regs) == 1, regs
 
 
+def test_regression_latency_sub_ms_noise_ignored():
+    # 亚毫秒级延迟差异（0.001→0.005ms = +400%）是测量噪声，不应报回归
+    history = [
+        {"status": "PASS", "metrics": {"latency_p99_ms": 0.001}},
+        {"status": "PASS", "metrics": {"latency_p99_ms": 0.001}},
+        {"status": "PASS", "metrics": {"latency_p99_ms": 0.001}},
+    ]
+    regs = check_regression({"latency_p99_ms": 0.005}, history)
+    assert regs == [], [str(r) for r in regs]
+
+
+def test_regression_latency_real_drop_still_detected():
+    # 毫秒级延迟真实退化（1.0→2.0ms = +100%）仍应报回归
+    history = [
+        {"status": "PASS", "metrics": {"latency_p99_ms": 1.0}},
+        {"status": "PASS", "metrics": {"latency_p99_ms": 1.0}},
+        {"status": "PASS", "metrics": {"latency_p99_ms": 1.0}},
+    ]
+    regs = check_regression({"latency_p99_ms": 2.0}, history)
+    assert len(regs) == 1, regs
+    assert regs[0].metric == "latency_p99_ms"
+
+
+def test_regression_short_duration_excluded_from_baseline():
+    # 短测量（duration_ms < 2s）吞吐虚高，应排除出基线：
+    # 854 万（1035ms 短测量）剔除后，基线 48.1 万，当前 55.7 万 = +15.8% 不报退化
+    history = [
+        {"status": "PASS", "duration_ms": 18000, "metrics": {"throughput_reqs_per_sec": 480000}},
+        {"status": "PASS", "duration_ms": 17500, "metrics": {"throughput_reqs_per_sec": 482000}},
+        {"status": "PASS", "duration_ms": 1035, "metrics": {"throughput_reqs_per_sec": 8540000}},
+    ]
+    regs = check_regression({"throughput_reqs_per_sec": 557000}, history)
+    assert regs == [], [str(r) for r in regs]
+
+
+def test_regression_duration_missing_kept_in_baseline():
+    # duration_ms 缺失（None）视为「无时长信息」→ 保留，不误剔除（向后兼容）
+    history = [
+        {"status": "PASS", "metrics": {"throughput": 100}},
+        {"status": "PASS", "metrics": {"throughput": 100}},
+    ]
+    regs = check_regression({"throughput": 50}, history)
+    assert len(regs) == 1, regs
+
+
+def test_regression_stale_record_excluded_from_baseline():
+    # 超过 7 天的旧记录（可能经历代码/参数/测量方式变更）排除出基线：
+    # 08-14 单轮测量 338 万 req/s 混入会误判 79 万 ↓66%，窗口过滤后基线纯近期数据不报
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    recent_ts = (now - timedelta(days=1)).isoformat()
+    stale_ts = (now - timedelta(days=10)).isoformat()
+    history = [
+        {"status": "PASS", "timestamp": recent_ts, "duration_ms": 83000,
+         "metrics": {"throughput_reqs_per_sec": 775000}},
+        {"status": "PASS", "timestamp": recent_ts, "duration_ms": 85000,
+         "metrics": {"throughput_reqs_per_sec": 745000}},
+        {"status": "PASS", "timestamp": stale_ts, "duration_ms": 19559,
+         "metrics": {"throughput_reqs_per_sec": 3380000}},
+    ]
+    regs = check_regression({"throughput_reqs_per_sec": 797000}, history)
+    # 基线 = (775000 + 745000) / 2 = 760000，当前 797000 = +4.9% → 不报退化
+    assert regs == [], [str(r) for r in regs]
+
+
 # ── compact_markdown（run 回归节 / 非标准参数标注）────────────
 
 
@@ -327,6 +392,11 @@ def main() -> int:
         ("regression — 总量指标 duration 归一化不误报", test_regression_duration_normalized_no_false_positive),
         ("regression — 总量指标真降仍检测", test_regression_duration_normalized_real_drop),
         ("regression — 无 duration 旧记录兼容", test_regression_duration_missing_backward_compatible),
+        ("regression — 亚毫秒延迟噪声忽略", test_regression_latency_sub_ms_noise_ignored),
+        ("regression — 毫秒级延迟真退化仍检测", test_regression_latency_real_drop_still_detected),
+        ("regression — 短 duration 排除出基线", test_regression_short_duration_excluded_from_baseline),
+        ("regression — duration 缺失保留基线", test_regression_duration_missing_kept_in_baseline),
+        ("regression — 陈旧记录排除出基线", test_regression_stale_record_excluded_from_baseline),
         ("compact_markdown — 回归节渲染", test_compact_markdown_regression_section),
         ("compact_markdown — 空 dict 渲染 ✓", test_compact_markdown_regression_empty_dict),
         ("compact_markdown — None 不渲染", test_compact_markdown_regression_none_not_rendered),

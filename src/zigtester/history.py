@@ -29,6 +29,22 @@ _MAX_HISTORY = 30
 # 误报 -40%，归一化后 req/s 稳定 ~6.6k 无退化）。
 _DURATION_SCALED_METRICS = frozenset({"success_count", "total_requests", "error_count"})
 
+# 延迟类指标绝对差异阈值（ms）：亚毫秒级延迟的百分比波动是测量噪声
+# （0.001→0.005ms = +400% 但绝对差仅 4 微秒，无意义），绝对差异 < 该值时不报回归
+# （2026-08-26 zigdns bench 实证：latency_p99 0.001→0.005 被误报 ↑400%）。
+_LATENCY_ABS_THRESHOLD_MS = 1.0
+
+# 基线最短时长（ms）：排除 < 2s 的短测量——启动瞬态污染吞吐，测出虚高值
+# （2026-08-26 zigdns 实证：08-14 旧参数 214~1391ms 短测量吞吐 681万~854万 req/s，
+# 混入基线把 55 万误判为 ↓74%；剔除后基线 60.7 万，-8% 不报）。
+_MIN_BASELINE_DURATION_MS = 2000
+
+# 基线最大年龄（天）：超过该窗口的旧记录视为不可比——期间可能经历代码/参数/测量方式
+# 变更（如单轮→多轮 --rounds 测量，吞吐降 4 倍但非代码退化），排除出基线
+# （2026-08-26 zigdns 实证：08-14 单轮测量 lookup-v4 338万 req/s 混入基线，
+# 把 08-26 多轮测量的 79 万误判 ↓66%；窗口过滤后基线纯 08-26 数据，不报）。
+_MAX_BASELINE_AGE_DAYS = 7
+
 # SQLite 路径
 _DB_PATH = Path.home() / ".zigtester" / "history.db"
 # 旧版 JSON 数据路径（迁移源）
@@ -433,7 +449,10 @@ def check_regression(
     # （2026-08-18 实证：新 id 冷启动期基线混入 FAIL 记录的 fd 峰值，
     # 正常 PASS 反而报退化）
     baseline_window = [
-        r for r in history if r.get("status", "PASS") == "PASS"
+        r for r in history
+        if r.get("status", "PASS") == "PASS"
+        and not _is_short_duration(r)
+        and not _is_stale(r)
     ][:5]
     if not baseline_window:
         return []
@@ -479,6 +498,12 @@ def check_regression(
             continue
 
         pct_change = ((cur_val - baseline_avg) / abs(baseline_avg)) * 100
+
+        # 延迟类亚毫秒噪声 guard：绝对差异 < 阈值时百分比变化无意义
+        # （0.001→0.005ms = +400% 但绝对差 4 微秒是测量噪声，见常量注释）
+        if _is_latency_metric(metric_name) and abs(cur_val - baseline_avg) < _LATENCY_ABS_THRESHOLD_MS:
+            continue
+
         is_regression = _is_metric_regression(metric_name, pct_change, threshold_pct)
 
         if is_regression:
@@ -536,6 +561,35 @@ def check_regression(
                 ))
 
     return [r for r in regressions if r.is_regression]
+
+
+def _is_latency_metric(metric_name: str) -> bool:
+    """延迟类指标（latency_*）：亚毫秒级差异是测量噪声，百分比回归无意义。"""
+    return "latency" in metric_name
+
+
+def _is_short_duration(r: dict) -> bool:
+    """短测量判定：duration_ms 存在且 0 < d < 阈值 → 启动瞬态污染吞吐，排除出基线。
+
+    duration_ms 缺失（None）或 0（未记录）视为「无时长信息」→ 保留（向后兼容旧记录）。
+    """
+    d = r.get("duration_ms")
+    return d is not None and 0 < d < _MIN_BASELINE_DURATION_MS
+
+
+def _is_stale(r: dict) -> bool:
+    """陈旧基线判定：timestamp 超过 _MAX_BASELINE_AGE_DAYS → 期间可能经历代码/参数/
+    测量方式变更，排除出基线。无 timestamp 或解析失败 → 保留（向后兼容）。"""
+    ts = r.get("timestamp")
+    if not ts:
+        return False
+    try:
+        dt = datetime.fromisoformat(ts)
+    except (ValueError, TypeError):
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_CST)
+    return (datetime.now(dt.tzinfo) - dt) > timedelta(days=_MAX_BASELINE_AGE_DAYS)
 
 
 def _is_metric_regression(

@@ -15,8 +15,14 @@
 - zigtester 自身单测全绿：test_args_passthrough 6 + test_env_guard 15 + test_per_suite_only 4 +
   test_report_history 24 + test_runner_env + test_plugin_ports + test_target_monitor。
 
-## 近期定论（2026-08-18 → 08-25）
+## 近期定论（2026-08-18 → 08-26）
 
+- **08-26 回归检测基线三重过滤修复**（zigdns 审查发现）：bench 吞吐回归被历史基线污染误报 ↓73%~98%。
+  三重根因 + 修复（`history.py` `check_regression`）：
+  ① 短-duration 启动瞬态 → `_is_short_duration`（剔除 duration_ms < 2s）；
+  ② 单轮→多轮测量方式变更的旧数据不可比 → `_is_stale`（剔除 > 7 天陈旧记录）；
+  ③ 延迟亚毫秒噪声 → `_is_latency_metric` guard（绝对差 < 1ms 不报）。
+  test_report_history 27→32 全绿；zigdns 全量 regressions 空（修复前稳定误报）。
 - **08-25 回归检测 duration 归一化修复**：bench-long 类套件总量指标（success_count/total_requests/
   error_count）随压测时长线性增长，`--duration` 默认值 40s→10s 调整被误判为吞吐回归（实证：
   hy2 success_count 266471@40s → 65594@10s 误报 -40%，req/s 稳定 ~6.6k 无退化）。修复 =
