@@ -17,6 +17,11 @@
 
 ## 近期定论（2026-08-18 → 08-25）
 
+- **08-25 回归检测 duration 归一化修复**：bench-long 类套件总量指标（success_count/total_requests/
+  error_count）随压测时长线性增长，`--duration` 默认值 40s→10s 调整被误判为吞吐回归（实证：
+  hy2 success_count 266471@40s → 65594@10s 误报 -40%，req/s 稳定 ~6.6k 无退化）。修复 =
+  `check_regression` 对总量指标按 `duration_s` 归一化到每秒速率再对比（`_DURATION_SCALED_METRICS`
+  + `_duration_of`）；无 duration 的旧记录不归一化（向后兼容）。test_report_history 24→27 全绿。
 - **08-25 性能测试架构重构落地 + 端到端验证**：4 层级确认；bench-standard-inbound PASS（641 req/s）；
   bench-long-socks5 PASS 且 analyze_leak 显式生效（rss_growth/fd_growth 进 metrics）+ 跨层级基线保留
   （回归基线取旧 performance 历史）。**bench-standard-outbound FAIL = zigbox 数据路径 bug**（route.final

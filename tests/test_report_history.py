@@ -143,6 +143,39 @@ def test_regression_all_fail_no_baseline():
     assert check_regression({"throughput": 100}, history) == []
 
 
+def test_regression_duration_normalized_no_false_positive():
+    # 40s→10s：success_count 总量随时长减半，但速率一致 → 不应误报退化
+    history = [
+        {"status": "PASS", "metrics": {"success_count": 2400, "duration_s": 40}},
+        {"status": "PASS", "metrics": {"success_count": 2400, "duration_s": 40}},
+        {"status": "PASS", "metrics": {"success_count": 2400, "duration_s": 40}},
+    ]
+    regs = check_regression({"success_count": 600, "duration_s": 10}, history)
+    assert regs == [], [str(r) for r in regs]
+
+
+def test_regression_duration_normalized_real_drop():
+    # 相同 duration，success_count 总量真降（=速率真降）→ 仍报退化
+    history = [
+        {"status": "PASS", "metrics": {"success_count": 1000, "duration_s": 10}},
+        {"status": "PASS", "metrics": {"success_count": 1000, "duration_s": 10}},
+        {"status": "PASS", "metrics": {"success_count": 1000, "duration_s": 10}},
+    ]
+    regs = check_regression({"success_count": 500, "duration_s": 10}, history)
+    assert len(regs) == 1, regs
+    assert regs[0].metric == "success_count"
+
+
+def test_regression_duration_missing_backward_compatible():
+    # 旧记录无 duration_s → 不归一化，按原值对比（保持既有行为）
+    history = [
+        {"status": "PASS", "metrics": {"success_count": 1000}},
+        {"status": "PASS", "metrics": {"success_count": 1000}},
+    ]
+    regs = check_regression({"success_count": 500}, history)
+    assert len(regs) == 1, regs
+
+
 # ── compact_markdown（run 回归节 / 非标准参数标注）────────────
 
 
@@ -291,6 +324,9 @@ def main() -> int:
         ("regression — 无 status 字段兼容", test_regression_without_status_field_compatible),
         ("regression — 检测吞吐下降", test_regression_detects_drop),
         ("regression — 全 FAIL 无基线", test_regression_all_fail_no_baseline),
+        ("regression — 总量指标 duration 归一化不误报", test_regression_duration_normalized_no_false_positive),
+        ("regression — 总量指标真降仍检测", test_regression_duration_normalized_real_drop),
+        ("regression — 无 duration 旧记录兼容", test_regression_duration_missing_backward_compatible),
         ("compact_markdown — 回归节渲染", test_compact_markdown_regression_section),
         ("compact_markdown — 空 dict 渲染 ✓", test_compact_markdown_regression_empty_dict),
         ("compact_markdown — None 不渲染", test_compact_markdown_regression_none_not_rendered),

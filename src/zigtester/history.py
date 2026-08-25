@@ -23,6 +23,12 @@ from .config import ProjectResult, Regression, SuiteResult
 _CST = timezone(timedelta(hours=8))
 _MAX_HISTORY = 30
 
+# 总量类指标：值随压测时长线性增长，回归对比前须按 duration_s 归一化。
+# 否则 --duration 40→10 的测试默认值调整会被误判为吞吐回归
+# （2026-08-25 实证：bench-long-hysteria2 success_count 266471@40s → 65594@10s
+# 误报 -40%，归一化后 req/s 稳定 ~6.6k 无退化）。
+_DURATION_SCALED_METRICS = frozenset({"success_count", "total_requests", "error_count"})
+
 # SQLite 路径
 _DB_PATH = Path.home() / ".zigtester" / "history.db"
 # 旧版 JSON 数据路径（迁移源）
@@ -387,6 +393,16 @@ def detect_flaky(records: list[dict], window: int = 8) -> bool:
 
 # ── 回归检测 ────────────────────────────────────────────────
 
+def _duration_of(metrics: Any) -> float:
+    """取 metrics 中的压测时长（秒），无则返回 0（旧记录无 duration 信息）。"""
+    if not isinstance(metrics, dict):
+        return 0.0
+    try:
+        return float(metrics.get("duration_s", 0) or 0)
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def check_regression(
     current: dict[str, float],
     history: list[dict],
@@ -434,14 +450,26 @@ def check_regression(
         if cur_val is None:
             continue
 
+        # 总量类指标随压测时长线性增长：先归一化到每秒速率再对比，
+        # 否则 --duration 默认值调整（40s→10s）会被误判为吞吐回归。
+        is_scaled = metric_name in _DURATION_SCALED_METRICS
+        cur_duration = _duration_of(current)
+        if is_scaled and cur_duration > 0:
+            cur_val = cur_val / cur_duration
+
         baseline_values: list[float] = []
         for r in baseline_window:
             m = r.get("metrics", {})
             if isinstance(m, dict) and metric_name in m:
                 try:
-                    baseline_values.append(float(m[metric_name]))
+                    val = float(m[metric_name])
                 except (ValueError, TypeError):
-                    pass
+                    continue
+                if is_scaled:
+                    d = _duration_of(m)
+                    if d > 0:
+                        val = val / d
+                baseline_values.append(val)
 
         if not baseline_values:
             continue

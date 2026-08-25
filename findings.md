@@ -25,6 +25,7 @@
 | xray 裸 TCP readiness 探针（无 REST API） | `plugins/xray-core/xray_ctl.py` |
 | Clash API 不支持原生格式热重载 | `plugins/sing-box/singbox_ctl.py` `reload`（L457 注释） |
 | local-echo 统一 Go 实现 + 端口契约 | `plugins/local-echo/main.go` 头部 |
+| 回归检测总量指标 duration 归一化（防 --duration 调整误报） | `src/zigtester/history.py` `_DURATION_SCALED_METRICS` + `_duration_of` + `check_regression` |
 
 ## 最近关键定论（2026-08-18 → 08-25）
 

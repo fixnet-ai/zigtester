@@ -18,7 +18,11 @@
   - **D performance-scenarios 层级**：VALID_LEVELS/schema/list 3 处；zigbox 12 旧套件迁入 + analyze_leak 显式生效
     （bench-long-socks5 metrics 含 rss_growth/fd_growth）；**跨层级基线保留**（旧 performance 历史仍作回归基线）
   - **history.py `_is_metric_regression` 修复**：吞吐关键词补 `req_s`（req_s 上升 136.8% 曾被误标回归）
-- **zigtester 自身单测全绿**：test_args_passthrough 6 + test_env_guard 15 + test_per_suite_only 4 + test_report_history 24 + test_runner_env + test_plugin_ports + test_target_monitor。
+- **history.py 回归检测 duration 归一化（08-25）**：bench-long 总量指标（success_count/total_requests/
+  error_count）按 duration_s 归一化到每秒速率再对比，修复 --duration 40s→10s 被误判为吞吐回归
+  （hy2 success_count 266471@40s → 65594@10s 误报 -40%，实际 req/s 稳定无退化）。test_report_history
+  24→27 全绿。
+- **zigtester 自身单测全绿**：test_args_passthrough 6 + test_env_guard 15 + test_per_suite_only 4 + test_report_history 27 + test_runner_env + test_plugin_ports + test_target_monitor。
 - **兄弟项目全部接入 zigtester**：zigfoundation/zigbox/zigtun/zigproxy/zigdns/zigoutbounds + zigroute/zigunicfg。
 
 ## ✅ 已完成：性能测试架构重构（A/B/C/D，2026-08-25）
