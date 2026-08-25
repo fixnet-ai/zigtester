@@ -103,8 +103,16 @@ func handleTcp(conn net.Conn) {
 		echoMode(conn, r, rest, true)
 		return
 	}
-	// HTTP 请求:原文作为 response body;keep-alive 请求连接复用,Connection: close 走原优雅关闭
-	handleHttpConnection(conn, r, data)
+	// HTTP 请求:原文作为 response body;keep-alive 请求连接复用,Connection: close 走原优雅关闭。
+	// 非 HTTP 方法首包(如 anytls-verify 真理源客户端的原始字节)必须走 writeHttpResponse
+	// (200 + 原文 + Connection: close)——handleHttpConnection 要求合法 HTTP 请求结构
+	// (\r\n\r\n 头边界 + Content-Length),原始字节会死等请求边界导致客户端读超时
+	// (e700c5c keep-alive 引入的回归,anytls-verify 确定性 FAIL 根因)。
+	if startsWithMethodBytes(data) {
+		handleHttpConnection(conn, r, data)
+		return
+	}
+	writeHttpResponse(conn, data)
 }
 
 // mergeWithin — 短窗口合并后续数据段(QUIC 惰性首帧等分片场景:
