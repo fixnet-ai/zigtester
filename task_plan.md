@@ -48,7 +48,8 @@
 > - **ss-xray 剔除（用户裁定）**：zigbox SS 客户端 ↔ xray 2022-blake3 握手不兼容，剔除非修复 ✅
 > - **redirect 平台守卫已落地**：`bench_outbound_cells()` 非 Linux 不枚举 ✅
 > - **剩余**：socks/socks-xray 确定性 fd 耗尽（24593 `accept failed: ProcessFdQuotaExceeded`，
->   679 成功请求 ×3 fd ≈ 2048 不释放）→ zigbox socks 出站连接泄漏，待定位。套件修复前持续 FAIL，
+>   679 成功请求 ×3 fd ≈ 2048 不释放）→ zigbox socks 出站连接泄漏，**已移交 zigoutbounds 跟踪**
+>   （zigoutbounds task_plan『⚠️ 遗留』+ findings §52）。套件修复前持续 FAIL，
 >   勿改 zigtester 侧掩盖。完整诊断见 findings §10。
 
 ## 历史完成阶段总表（Phase 1-12，全部完成）
