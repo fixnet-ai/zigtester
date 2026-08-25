@@ -77,6 +77,10 @@ mcp = FastMCP("zigtester", instructions=_INSTRUCTIONS)
 
 # ── 辅助 ──────────────────────────────────────────────────
 
+# 泄漏判定键（rss_growth_mb/fd_growth/cpu_head_pct/cpu_tail_pct）不入回归基线 —
+# 泄漏已由 analyze_leak + yaml thresholds 机制判定，混入回归基线会假阳性（决策 D2）。
+LEAN_KEYS = {"rss_growth_mb", "fd_growth", "cpu_head_pct", "cpu_tail_pct"}
+
 
 def _load_project(dir: str | None) -> "DiscoveredProject | None":
     """从 dir 向上查找 zigtester.yaml 并加载为 DiscoveredProject。
@@ -218,6 +222,7 @@ async def zigtester_run(
     level: str = "all",
     suite: str | None = None,
     dir: str | None = None,
+    args: str | None = None,
     ctx: Context | None = None,
 ) -> dict:
     """执行测试并返回结构化结果 — 所有测试的唯一入口。
@@ -232,11 +237,17 @@ async def zigtester_run(
       唯一正确动作是重新调用本工具（自动恢复环境），禁止手动启停插件进程
     - SKIP = 前序失败/环境缺失联动跳过
     - 单套件最小复现：suite 传套件名（自动含其依赖），比全量更快定位问题
+    - `regressions` 字段：本次性能套件 vs 历史基线的退化检测（仅 PASS 且
+      有指标时计算；键 = 套件名，值 = 退化列表）
+    - args 非空时：追加到命令尾部，且不保存历史、不做回归对比
+      （非标准探测，避免污染标准基线）
 
     Args:
-        level: 测试层级 unit/functional/performance/all，默认 all
+        level: 测试层级 unit/functional/performance/performance-scenarios/all，默认 all
         suite: 仅运行指定套件（名称先经 zigtester_list 查询），可选
         dir: 项目目录路径（或其任意子目录，自动向上查找 zigtester.yaml），默认当前目录
+        args: 透传给测试命令尾部的非标准参数（如 "-n 10"），可选；
+              非空时不保存历史也不做回归对比
     """
     from .config import VALID_LEVELS
     from .reporter import Reporter
@@ -257,19 +268,48 @@ async def zigtester_run(
         # 长任务：线程池跑 run_project，事件循环发 progress 心跳保活，
         # 避免同步阻塞导致 MCP 客户端超时。
         pr = await _run_with_progress(
-            ctx, lambda: run_project(p, levels, suite_filter=suite)
+            ctx, lambda: run_project(p, levels, suite_filter=suite, suite_args=args)
         )
     else:
-        pr = run_project(p, levels, suite_filter=suite)
+        pr = run_project(p, levels, suite_filter=suite, suite_args=args)
 
-    # 保存历史
-    try:
-        from .history import save_run
-        from .config import ensure_project_id
-        pid = ensure_project_id(p.config_path, p.config)
-        save_run(pr, pid, p.path)
-    except Exception:
-        pass
+    # 回归对比（MCP-only）：在保存历史之前进行——此时本次记录未入库，
+    # 不污染基线（保存顺序：先查历史再写库）。非标准参数探测（args 非空）
+    # 跳过：不保存历史即无对比基线，regressions 保持 None（report 不渲染）。
+    regressions: dict[str, list[Any]] | None = None
+    if not args:
+        from .history import check_regression, load_history
+        regressions = {}
+        for s in pr.suites:
+            if (s.level in ("performance", "performance-scenarios")
+                    and s.status == "PASS" and s.metrics):
+                # 过滤泄漏键（决策 D2）— 泄漏走 analyze_leak + thresholds
+                current_metrics = {
+                    k: v for k, v in s.metrics.items() if k not in LEAN_KEYS
+                }
+                hist = load_history(pr.project, s.suite_name, n=30)
+                rp = s.resource_peak
+                # 键名用 peak_fd（对齐 history 存储的 peak_fd，非 peak_fd_count）
+                current_resource = {
+                    "peak_memory_mb": rp.peak_memory_mb,
+                    "peak_fd": rp.peak_fd_count,
+                    "peak_cpu_pct": rp.peak_cpu_pct,
+                }
+                regs = check_regression(
+                    current_metrics, hist, current_resource=current_resource
+                )
+                if regs:
+                    regressions[s.suite_name] = regs
+
+    # 保存历史（args 非空时跳过，保护标准基线不被非标准参数污染）
+    if not args:
+        try:
+            from .history import save_run
+            from .config import ensure_project_id
+            pid = ensure_project_id(p.config_path, p.config)
+            save_run(pr, pid, p.path)
+        except Exception:
+            pass
 
     # 构建精简响应 — 不含 stdout/stderr 原文
     suites_out = []
@@ -333,7 +373,20 @@ async def zigtester_run(
             "errors": all_err,
         },
         "suites": suites_out,
-        "report": Reporter.compact_markdown(pr),
+        "regressions": {
+            suite_name: [
+                {
+                    "metric": reg.metric,
+                    "current": reg.current,
+                    "baseline_avg": reg.baseline_avg,
+                    "pct_change": reg.pct_change,
+                    "is_regression": reg.is_regression,
+                }
+                for reg in regs
+            ]
+            for suite_name, regs in (regressions or {}).items()
+        },
+        "report": Reporter.compact_markdown(pr, regressions=regressions),
     }
 
 
@@ -350,9 +403,12 @@ def zigtester_history(
       统计 PASS 记录，环境破坏数据不污染）
     - flaky=true 表示近期 PASS/FAIL 反复翻转——该套件结果不稳定，
       单次运行不足为凭，需多次确认后再下结论
+    - `report` 字段是预格式化 Markdown 趋势报表，**必须原样展示给用户**
     - suite 传**协议组名**（如 "direct"）时返回组视图：合并 bench-tcp-direct /
       bench-stream-direct / bench-long-direct / bench-tcp-sweep-direct 的
-      全部历史（groups 字段按成员套件分组）——压力并入性能后按组查看趋势
+      全部历史（groups 字段按成员套件分组）——压力并入性能后按组查看趋势。
+      组视图下 `regressions`/`flaky` 变为 **{成员套件名: 值}** dict 结构
+      （单套件路径不变，仍为 list/bool）
 
     Args:
         project: 项目名（zigtester_scan 返回的 name）
@@ -360,7 +416,7 @@ def zigtester_history(
         limit: 返回记录数（默认 10）
     """
     from .history import check_regression, detect_flaky, list_suites, load_history
-    from .reporter import performance_group
+    from .reporter import Reporter, performance_group
 
     records = load_history(project, suite, n=limit)
     current_metrics = records[0].get("metrics", {}) if records else {}
@@ -378,6 +434,20 @@ def zigtester_history(
         if members:
             group_records = {m: load_history(project, m, n=limit) for m in members}
 
+    # 组视图修复：regressions/flaky 按成员预计算（直接查组名 DB 无记录，
+    # 否则组视图永远空回归/空 flaky）
+    if group_records is not None:
+        regressions = {
+            m: check_regression(
+                r[0].get("metrics", {}) if r else {},
+                r,
+                current_resource=r[0].get("resource", {}) if r else {},
+            )
+            if r else []
+            for m, r in group_records.items()
+        }
+        flaky = {m: detect_flaky(r) for m, r in group_records.items()}
+
     # 精简历史（只保留时间戳和指标）
     runs_out = []
     for r in records[:limit]:
@@ -388,21 +458,29 @@ def zigtester_history(
             "metrics": r.get("metrics", {}),
         })
 
+    def _reg_json(reg) -> dict:
+        return {
+            "metric": reg.metric,
+            "current": reg.current,
+            "baseline_avg": reg.baseline_avg,
+            "pct_change": reg.pct_change,
+            "is_regression": reg.is_regression,
+        }
+
     out: dict[str, Any] = {
         "project": project,
         "suite": suite,
         "flaky": flaky,
         "runs": runs_out,
-        "regressions": [
-            {
-                "metric": reg.metric,
-                "current": reg.current,
-                "baseline_avg": reg.baseline_avg,
-                "pct_change": reg.pct_change,
-                "is_regression": reg.is_regression,
-            }
-            for reg in regressions
-        ],
+        "regressions": (
+            {m: [_reg_json(r) for r in regs] for m, regs in regressions.items()}
+            if isinstance(regressions, dict)
+            else [_reg_json(r) for r in regressions]
+        ),
+        "report": Reporter.compact_history(
+            project, suite, records, regressions, flaky,
+            group_records=group_records,
+        ),
     }
     if group_records is not None:
         out["groups"] = {

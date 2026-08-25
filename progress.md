@@ -9,11 +9,19 @@
 
 - 分支 `main`。**全部 Phase 1-12 完成**（2026-08-07 → 08-21），最近收尾：插件 host 化（P12）、
   MCP SSE+progress、per_suite_only、target 资源采集。
+- **性能测试架构重构 A/B/C/D 完成**（08-25，本会话）：参数透传（--args）+ run 自动回归对比（MCP-only）
+  + history 固定报表 + performance-scenarios 层级 + zigbox 迁移。见 task_plan「✅ 已完成」节。
 - 兄弟项目全部接入：zigfoundation / zigbox / zigtun / zigproxy / zigdns / zigoutbounds + zigroute / zigunicfg。
-- zigtester 自身单测全绿：test_env_guard 15 + test_report_history 15 + test_per_suite_only 4 + test_target_monitor 5。
+- zigtester 自身单测全绿：test_args_passthrough 6 + test_env_guard 15 + test_per_suite_only 4 +
+  test_report_history 24 + test_runner_env + test_plugin_ports + test_target_monitor。
 
-## 近期定论（2026-08-18 → 08-23）
+## 近期定论（2026-08-18 → 08-25）
 
+- **08-25 性能测试架构重构落地 + 端到端验证**：4 层级确认；bench-standard-inbound PASS（641 req/s）；
+  bench-long-socks5 PASS 且 analyze_leak 显式生效（rss_growth/fd_growth 进 metrics）+ 跨层级基线保留
+  （回归基线取旧 performance 历史）。**bench-standard-outbound FAIL = zigbox 数据路径 bug**（route.final
+  兜底非 direct 出站未覆盖，fd 耗尽 + 重量出站请求 30s 挂起），诊断见 findings §10，交回 zigbox。
+  history.py `_is_metric_regression` 修复（吞吐关键词补 req_s，修 req_s 上升 136.8% 误标回归）。
 - **08-23 target 字段**：只采目标被测程序（bench-long-direct peak 8.2 / avg 8.1MB 与 psutil 探针吻合，
   launchd.log 无 fallback warning）；5 项目 48 处 target 补齐（zigbox/zigdns/zigproxy/zigtun/zigunicfg）。
 - **08-22 per_suite_only**：zigoutbounds 25 套件全量 321.6s → `--level` 全量 25 SKIP 2.3s；`--suite` 单跑 PASS。

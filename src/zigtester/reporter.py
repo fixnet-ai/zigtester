@@ -213,13 +213,14 @@ class Reporter:
             return
 
         print(f"{_BOLD}{project.name}{_RESET} — 测试套件\n")
-        level_order = ["unit", "functional", "performance"]
+        level_order = ["unit", "functional", "performance", "performance-scenarios"]
         for level_name in level_order:
             lc = project.config.levels.get(level_name)
             if lc is None or not lc.suites:
                 continue
             label = {"unit": "单元", "functional": "功能",
-                     "performance": "性能"}.get(level_name, level_name)
+                     "performance": "性能",
+                     "performance-scenarios": "性能场景"}.get(level_name, level_name)
             print(f"  {_CYAN}[{level_name}]{_RESET} {label}")
             for s in lc.suites:
                 deps = f" ← {', '.join(s.depends_on)}" if s.depends_on else ""
@@ -568,11 +569,17 @@ class Reporter:
     # ── 紧凑 Markdown 表格（MCP 专用）──────────────────────
 
     @staticmethod
-    def compact_markdown(result: ProjectResult) -> str:
+    def compact_markdown(
+        result: ProjectResult,
+        regressions: dict[str, list[Regression]] | None = None,
+    ) -> str:
         """生成固定格式的紧凑 Markdown 表格 — 保证 MCP 人类可读性一致。
 
         每次 zigtester_run 返回此字段，Claude Code 直接渲染 markdown
         表格，格式完全由服务端控制，不依赖模型排版。
+
+        regressions: {套件名: [Regression, ...]}。None = 未启用回归对比
+        （不渲染）；空 dict = 已分析且无退化（渲染 ✓）。
         """
         elapsed = result.finished_at - result.started_at
         pass_n = sum(1 for s in result.suites if s.status == "PASS")
@@ -593,6 +600,9 @@ class Reporter:
             "| 层级 | 套件 | 状态 | 耗时 | 资源 | 关键指标 |",
             "|------|------|------|------|------|----------|",
         ]
+        # 非标准参数标注（仅 suite_args 非空时，标题下加一行）
+        if result.suite_args:
+            lines.insert(1, f"⚠ 非标准参数: {result.suite_args}")
 
         for s in result.suites:
             icon_s = _STATUS_ICONS.get(s.status, "?")
@@ -675,21 +685,168 @@ class Reporter:
                             lines.append(f"    {rl}")
                         lines.append("    ```")
 
+        # 回归检测（regressions=None 表示未启用对比，不渲染；
+        # 空 dict = 已分析且无退化，渲染 ✓；有内容 → 逐套件红字）
+        if regressions is not None:
+            lines.append("")
+            lines.append("### 回归检测")
+            if regressions:
+                for suite_name, regs in regressions.items():
+                    for reg in regs:
+                        direction = "↓" if reg.pct_change < 0 else "↑"
+                        lines.append(
+                            f"- 🔴 **{suite_name}** {reg.metric}: {reg.current:.2f} "
+                            f"vs 基线 {reg.baseline_avg:.2f} "
+                            f"({direction}{abs(reg.pct_change):.1f}%)"
+                        )
+            else:
+                lines.append("✓ 未检测到性能退化")
+
         return "\n".join(lines)
 
     # ── 历史 ───────────────────────────────────────────────
+
+    @staticmethod
+    def compact_history(
+        project: str,
+        suite: str,
+        records: list[dict],
+        regressions,
+        flaky,
+        group_records: dict[str, list[dict]] | None = None,
+    ) -> str:
+        """生成固定格式的历史趋势 Markdown — 保证 MCP/CLI markdown 渲染一致。
+
+        单套件模式（group_records=None）：
+          records 为 load_history() 返回（最新在前）；regressions 为
+          list[Regression]；flaky 为 bool。
+        组视图模式（group_records 非 None）：
+          regressions/flaky 为 {成员套件名: ...} dict，按成员分表 + 分节回归。
+        records 为空时渲染「无历史记录」，绝不访问 records[0]（防 IndexError）。
+        """
+        lines = [f"## {project}/{suite} — 历史趋势"]
+
+        if group_records is not None:
+            # ── 协议组视图 ──
+            if not group_records:
+                lines.append("无历史记录")
+                return "\n".join(lines)
+
+            flaky_members = sorted(m for m, f in (flaky or {}).items() if f)
+            if flaky_members:
+                lines.append(
+                    f"⚠ flaky: 成员 {', '.join(flaky_members)} 近期在 PASS/FAIL 间反复翻转"
+                )
+
+            for member in sorted(group_records):
+                member_records = group_records[member]
+                if not member_records:
+                    continue
+                mode = mode_of(member)
+                prefix = f"{mode}:" if mode else ""
+                lines.append(f"\n**{member}**")
+                lines.append("| 套件 | 时间 | 状态 | 耗时 | 指标 |")
+                lines.append("|------|------|------|------|------|")
+                for r in member_records:
+                    ts = r.get("timestamp", "")[:19]
+                    status = r.get("status", "?")
+                    dur = f"{r.get('duration_ms', 0):.0f}ms"
+                    metric_str = " ".join(
+                        f"{prefix}{k}={v}"
+                        for k, v in r.get("metrics", {}).items()
+                        if k not in ("exit_code",)
+                    )
+                    icon = {"PASS": "✅", "FAIL": "❌", "SKIP": "○", "ERROR": "⚠"}.get(
+                        status, "?"
+                    )
+                    lines.append(
+                        f"| {member} | {ts} | {icon} {status} | {dur} | {metric_str} |"
+                    )
+
+            # 回归检测（组视图：按成员分节）
+            lines.append("")
+            lines.append("### 回归检测")
+            has_reg = False
+            for member in sorted(group_records):
+                for reg in (regressions or {}).get(member, []):
+                    has_reg = True
+                    direction = "↓" if reg.pct_change < 0 else "↑"
+                    lines.append(
+                        f"- 🔴 **{member}** {reg.metric}: {reg.current:.2f} "
+                        f"vs 基线 {reg.baseline_avg:.2f} "
+                        f"({direction}{abs(reg.pct_change):.1f}%)"
+                    )
+            if not has_reg:
+                lines.append("✓ 未检测到性能退化")
+            return "\n".join(lines)
+
+        # ── 单套件 ──
+        if not records:
+            lines.append("无历史记录")
+            return "\n".join(lines)
+
+        if flaky:
+            lines.append("⚠ flaky: 近期结果在 PASS/FAIL 间反复翻转")
+
+        lines.append("| 时间 | 状态 | 耗时 | 指标 |")
+        lines.append("|------|------|------|------|")
+        for r in records:
+            ts = r.get("timestamp", "")[:19]
+            status = r.get("status", "?")
+            dur = f"{r.get('duration_ms', 0):.0f}ms"
+            metric_str = " ".join(
+                f"{k}={v}"
+                for k, v in r.get("metrics", {}).items()
+                if k not in ("exit_code",)
+            )
+            icon = {"PASS": "✅", "FAIL": "❌", "SKIP": "○", "ERROR": "⚠"}.get(
+                status, "?"
+            )
+            lines.append(f"| {ts} | {icon} {status} | {dur} | {metric_str} |")
+
+        # 回归检测
+        lines.append("")
+        lines.append("### 回归检测")
+        if regressions:
+            for reg in regressions:
+                direction = "↓" if reg.pct_change < 0 else "↑"
+                lines.append(
+                    f"- 🔴 **{suite}** {reg.metric}: {reg.current:.2f} "
+                    f"vs 基线 {reg.baseline_avg:.2f} "
+                    f"({direction}{abs(reg.pct_change):.1f}%)"
+                )
+        else:
+            lines.append("✓ 未检测到性能退化")
+        return "\n".join(lines)
 
     def print_history(
         self, project: str, suite: str,
         records: list[dict], regressions: list[Regression],
         group_records: dict[str, list[dict]] | None = None,
+        flaky: Any = None,
     ) -> None:
         """打印历史记录和回归检测结果。
 
         group_records: 协议组视图 — {套件名: records}。非 None 时渲染
         组内全部成员套件的合并表（每行 = 套件/时间/状态/指标，指标带模式
         前缀消歧），不破坏单套件精确匹配的原有逻辑。
+        flaky: 调用方预计算的 flaky 结果（单套件为 bool，组视图为
+        {成员: bool}）；None 时内部按需用 detect_flaky 计算。
         """
+        # markdown 分支 — 复用固定报表，修复此前静默退化到 terminal 的缺陷
+        if self.format == "markdown":
+            from .history import detect_flaky
+            if flaky is None:
+                if group_records is not None:
+                    flaky = {m: detect_flaky(r) for m, r in group_records.items()}
+                else:
+                    flaky = detect_flaky(records)
+            print(Reporter.compact_history(
+                project, suite, records, regressions, flaky,
+                group_records=group_records,
+            ))
+            return
+
         if self.format == "json":
             from .history import detect_flaky
             out: dict[str, Any] = {

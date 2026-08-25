@@ -527,7 +527,9 @@ def _is_metric_regression(
     )):
         return pct_change > 0
 
-    if any(kw in metric_name for kw in ("throughput", "reqs", "rate", "passed", "total")):
+    if any(kw in metric_name for kw in (
+        "throughput", "reqs", "req_s", "rate", "per_sec", "success", "passed", "total",
+    )):
         return pct_change < 0
 
     # 默认双向检测

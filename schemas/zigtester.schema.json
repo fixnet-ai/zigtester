@@ -73,9 +73,10 @@
       "type": "object",
       "description": "测试层级",
       "properties": {
-        "unit":        {"$ref": "#/$defs/level"},
-        "functional":  {"$ref": "#/$defs/level"},
-        "performance": {"$ref": "#/$defs/level"}
+        "unit":                  {"$ref": "#/$defs/level"},
+        "functional":            {"$ref": "#/$defs/level"},
+        "performance":           {"$ref": "#/$defs/level"},
+        "performance-scenarios": {"$ref": "#/$defs/level"}
       },
       "additionalProperties": false
     }

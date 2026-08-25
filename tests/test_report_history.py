@@ -15,8 +15,14 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from zigtester.config import (  # noqa: E402
+    ProjectResult,
+    Regression,
+    ResourceSnapshot,
+    SuiteResult,
+)
 from zigtester.history import check_regression, detect_flaky  # noqa: E402
-from zigtester.reporter import extract_failure_lines  # noqa: E402
+from zigtester.reporter import Reporter, extract_failure_lines  # noqa: E402
 
 _RESULTS: list[tuple[str, bool, str]] = []
 
@@ -137,6 +143,137 @@ def test_regression_all_fail_no_baseline():
     assert check_regression({"throughput": 100}, history) == []
 
 
+# ── compact_markdown（run 回归节 / 非标准参数标注）────────────
+
+
+def _make_project_result(suite_args=None) -> ProjectResult:
+    """构造一个含 PASS + 非空 metrics 的 performance 套件结果。"""
+    suite = SuiteResult(
+        suite_name="bench-socks5",
+        level="performance",
+        status="PASS",
+        duration_ms=120.0,
+        exit_code=0,
+        metrics={"p99_ms": 200.0},
+        message="p99=200.0ms",
+        resource_peak=ResourceSnapshot(sample_count=0),
+    )
+    return ProjectResult(
+        project="test-proj",
+        path="/tmp",
+        suites=[suite],
+        started_at=0.0,
+        finished_at=1.0,
+        suite_args=suite_args,
+    )
+
+
+def test_compact_markdown_regression_section():
+    result = _make_project_result()
+    regs = {"bench-socks5": [Regression("p99_ms", 200.0, 90.0, 122.2, True)]}
+    md = Reporter.compact_markdown(result, regressions=regs)
+    assert "回归检测" in md, md
+    assert "p99_ms" in md, md
+    assert "基线" in md, md
+    assert "bench-socks5" in md, md
+    assert "122.2%" in md, md
+
+
+def test_compact_markdown_regression_empty_dict():
+    # 空 dict = 已分析且无退化 → 渲染 ✓
+    result = _make_project_result()
+    md = Reporter.compact_markdown(result, regressions={})
+    assert "回归检测" in md, md
+    assert "✓ 未检测到性能退化" in md, md
+
+
+def test_compact_markdown_regression_none_not_rendered():
+    # None = 未启用回归对比 → 不渲染该节
+    result = _make_project_result()
+    md = Reporter.compact_markdown(result, regressions=None)
+    assert "回归检测" not in md, md
+
+
+def test_compact_markdown_suite_args_warning():
+    md = Reporter.compact_markdown(_make_project_result(suite_args="-n 10"))
+    assert "非标准参数" in md, md
+    assert "-n 10" in md, md
+
+    md_plain = Reporter.compact_markdown(_make_project_result())
+    assert "非标准参数" not in md_plain, md_plain
+
+
+# ── compact_history（固定历史报表）──────────────────────────
+
+
+def test_compact_history_empty():
+    # records 空 → 「无历史记录」，不访问 records[0]（防 IndexError）
+    md = Reporter.compact_history("proj", "bench-socks5", [], [], False)
+    assert "无历史记录" in md, md
+
+
+def test_compact_history_single():
+    records = [{
+        "timestamp": "2026-08-25T10:00:00+08:00",
+        "status": "PASS",
+        "duration_ms": 100.0,
+        "metrics": {"p99_ms": 90.0},
+    }]
+    md = Reporter.compact_history("proj", "bench-socks5", records, [], False)
+    assert "| 时间 | 状态 | 耗时 | 指标 |" in md, md
+    assert "2026-08-25" in md, md
+    assert "p99_ms=90.0" in md, md
+    assert "✓ 未检测到性能退化" in md, md
+    # 指标排除 exit_code
+    rec2 = [dict(records[0], metrics={"p99_ms": 90.0, "exit_code": 0})]
+    md2 = Reporter.compact_history("proj", "s", rec2, [], False)
+    assert "exit_code=0" not in md2, md2
+
+
+def test_compact_history_single_regression_red_line():
+    records = [{
+        "timestamp": "2026-08-25T10:00:00+08:00",
+        "status": "PASS",
+        "duration_ms": 100.0,
+        "metrics": {"p99_ms": 90.0},
+    }]
+    regs = [Regression("p99_ms", 200.0, 90.0, 122.2, True)]
+    md = Reporter.compact_history("proj", "bench-socks5", records, regs, False)
+    assert "回归检测" in md, md
+    assert "🔴" in md, md
+    assert "基线" in md, md
+
+
+def test_compact_history_group():
+    group_records = {"bench-tcp-direct": [{
+        "timestamp": "2026-08-25T10:00:00+08:00",
+        "status": "PASS",
+        "duration_ms": 100.0,
+        "metrics": {"p99_ms": 90.0},
+    }]}
+    md = Reporter.compact_history(
+        "proj", "direct", [], {}, {}, group_records=group_records
+    )
+    # 成员表头 + 模式前缀消歧 + 无退化
+    assert "| 套件 | 时间 | 状态 | 耗时 | 指标 |" in md, md
+    assert "tcp:p99_ms=90.0" in md, md
+    assert "✓ 未检测到性能退化" in md, md
+
+
+def test_compact_history_group_flaky_member():
+    group_records = {"bench-tcp-direct": [{
+        "timestamp": "2026-08-25T10:00:00+08:00",
+        "status": "PASS",
+        "duration_ms": 100.0,
+        "metrics": {"p99_ms": 90.0},
+    }]}
+    md = Reporter.compact_history(
+        "proj", "direct", [], {}, {"bench-tcp-direct": True},
+        group_records=group_records,
+    )
+    assert "flaky" in md, md
+
+
 def main() -> int:
     checks = [
         ("extract — 基本提取", test_extract_basic),
@@ -154,6 +291,15 @@ def main() -> int:
         ("regression — 无 status 字段兼容", test_regression_without_status_field_compatible),
         ("regression — 检测吞吐下降", test_regression_detects_drop),
         ("regression — 全 FAIL 无基线", test_regression_all_fail_no_baseline),
+        ("compact_markdown — 回归节渲染", test_compact_markdown_regression_section),
+        ("compact_markdown — 空 dict 渲染 ✓", test_compact_markdown_regression_empty_dict),
+        ("compact_markdown — None 不渲染", test_compact_markdown_regression_none_not_rendered),
+        ("compact_markdown — 非标准参数标注", test_compact_markdown_suite_args_warning),
+        ("compact_history — 空历史无 IndexError", test_compact_history_empty),
+        ("compact_history — 单套件表", test_compact_history_single),
+        ("compact_history — 单套件回归红字", test_compact_history_single_regression_red_line),
+        ("compact_history — 组视图分表 + 模式前缀", test_compact_history_group),
+        ("compact_history — 组视图 flaky 成员", test_compact_history_group_flaky_member),
     ]
     for name, fn in checks:
         check(name, fn)

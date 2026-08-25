@@ -76,6 +76,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("未发现任何项目。使用 `zigtester init` 创建配置。", file=sys.stderr)
         return 1
 
+    # --args 是单项目非标准探测：与 --all / 多项目互斥（决策 D1 + R2 延伸）
+    if args.args and args.all:
+        print("错误: --args 与 --all 互斥（args 是单项目非标准探测，不保存历史）", file=sys.stderr)
+        return 1
+    if args.args and len(target_projects) != 1:
+        print("错误: --args 仅支持单项目运行（防止多项目路径静默丢弃参数）", file=sys.stderr)
+        return 1
+
     levels = args.level.split(",") if args.level != "all" else []
     # 校验层级名
     for lv in levels:
@@ -94,14 +102,15 @@ def cmd_run(args: argparse.Namespace) -> int:
             fail_fast=args.fail_fast,
             no_build=args.no_build,
             suite_filter=args.suite,
+            suite_args=args.args,
         )
         reporter.print_results(pr)
 
         if args.json_output:
             reporter.save_json(pr, args.json_output)
 
-        # 保存历史（--no-history 跳过，避免污染性能基线）
-        if not args.no_history:
+        # 保存历史（--no-history 或非标准参数 --args 时跳过，避免污染性能基线）
+        if not (args.no_history or bool(args.args)):
             try:
                 from .history import save_run
                 from .config import ensure_project_id
@@ -163,7 +172,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_history(args: argparse.Namespace) -> int:
     """history 子命令 — 查看历史。"""
-    from .history import list_suites
+    from .history import detect_flaky, list_suites
     from .reporter import performance_group
 
     # 协议组视图：suite 不在已知套件名中 → 按协议组名合并组内全部成员历史
@@ -184,10 +193,25 @@ def cmd_history(args: argparse.Namespace) -> int:
     current_resource = records[0].get("resource", {}) if records else {}
 
     regressions = check_regression(current_metrics, records, current_resource=current_resource)
+    flaky = None
+    # 组视图：按成员预计算 regressions/flaky（与 server 端一致，否则
+    # 组视图永远空回归/空 flaky——组名在 DB 中无记录）
+    if group_records is not None:
+        regressions = {
+            m: check_regression(
+                r[0].get("metrics", {}) if r else {},
+                r,
+                current_resource=r[0].get("resource", {}) if r else {},
+            )
+            if r else []
+            for m, r in group_records.items()
+        }
+        flaky = {m: detect_flaky(r) for m, r in group_records.items()}
 
     reporter = Reporter(format=args.report_format)
     reporter.print_history(
-        args.project, args.suite, records, regressions, group_records=group_records
+        args.project, args.suite, records, regressions,
+        group_records=group_records, flaky=flaky,
     )
     return 0
 
@@ -270,6 +294,8 @@ def main() -> None:
                        help="并行执行多个项目（仅 --all 模式有效）")
     p_run.add_argument("--no-history", action="store_true",
                        help="不保存本次运行结果到历史（避免污染性能基线）")
+    p_run.add_argument("--args", help="透传给测试命令的非标准参数（如 '-n 10'；"
+                       "仅限单项目运行，且不保存历史）")
 
     # ── history ───────────────────────────────────────────
     p_hist = sub.add_parser("history", help="查看性能历史")

@@ -98,7 +98,9 @@ class TestExecutor:
     def __init__(self):
         self._proc: subprocess.Popen | None = None
 
-    def execute(self, suite: SuiteConfig, work_dir: str) -> SuiteResult:
+    def execute(
+        self, suite: SuiteConfig, work_dir: str, suite_args: str | None = None
+    ) -> SuiteResult:
         """执行单个测试套件，包含五阶段生命周期。
 
         Phase 1: setup（可选）→ Phase 2: test command →
@@ -108,6 +110,7 @@ class TestExecutor:
         Args:
             suite: 套件配置
             work_dir: 工作目录（项目根目录）
+            suite_args: 追加到命令尾部的非标准压测参数（如 "-n 10"），可选
 
         Returns:
             SuiteResult
@@ -153,6 +156,12 @@ class TestExecutor:
 
             # ── Phase 2: test command ──
             cmd_parts = _build_cmd(suite)
+            # 非标准压测参数追加到命令尾部（test_bench.py 的 argparse 选项位置无关）
+            if suite_args:
+                try:
+                    cmd_parts += shlex.split(suite_args)
+                except ValueError:
+                    cmd_parts += suite_args.split()   # 对齐 _build_cmd 兜底写法
             env = _build_env(suite)
             monitor = ResourceMonitor()
 
@@ -535,6 +544,7 @@ def run_project(
     fail_fast: bool = False,
     no_build: bool = False,
     suite_filter: str | None = None,
+    suite_args: str | None = None,
 ) -> ProjectResult:
     """执行单个项目的指定层级测试。
 
@@ -544,6 +554,7 @@ def run_project(
         fail_fast: 首个失败即停止
         no_build: 跳过构建步骤
         suite_filter: 仅运行指定名称的套件（可选）
+        suite_args: 追加到命令尾部的非标准压测参数（如 "-n 10"），可选
 
     Returns:
         ProjectResult
@@ -552,6 +563,7 @@ def run_project(
         project=project.config.project,
         path=project.path,
         started_at=time.time(),
+        suite_args=suite_args,
     )
 
     cfg = project.config
@@ -633,7 +645,7 @@ def run_project(
                         result.finished_at = time.time()
                         return result
 
-                suite_result = executor.execute(suite, work_dir)
+                suite_result = executor.execute(suite, work_dir, suite_args=suite_args)
                 suite_result.level = level_name
                 result.suites.append(suite_result)
 

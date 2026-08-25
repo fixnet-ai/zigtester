@@ -13,7 +13,7 @@ import yaml
 # ── 数据模型 ──────────────────────────────────────────────
 
 DEFAULT_TIMEOUT = 120
-VALID_LEVELS = ("unit", "functional", "performance")
+VALID_LEVELS = ("unit", "functional", "performance", "performance-scenarios")
 VALID_PARSERS = ("zig_test", "line_count", "test_protocols", "bench", "custom")
 VALID_STATUSES = ("PASS", "FAIL", "SKIP", "ERROR")
 
@@ -170,6 +170,7 @@ class ProjectResult:
     suites: list[SuiteResult] = field(default_factory=list)
     started_at: float = 0.0
     finished_at: float = 0.0
+    suite_args: str | None = None    # 透传的非标准压测参数（如 "-n 10"），非空时不保存历史
 
 
 @dataclass
