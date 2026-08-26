@@ -4,9 +4,9 @@
 //   - TCP echo :13333 — 协议自适应(SOCKS5 / HTTP CONNECT / HTTP),echo 阶段
 //     io.Copy 内核 splice(每连接 goroutine,与 bench-echo 同款高性能模型)
 //   - UDP echo :13333 — 原样回传数据报(透明代理 UDP 测试)
-//   - DNS echo :5533 — 测试域名(echo.direct/proxy/block, baidu.com, google.com)
-//     → 确定性 FakeIP(198.18.x.x / fd18::,MD5 哈希);localhost → 127.0.0.1/::1;
-//     其余转发上游 DNS
+//   - DNS echo :5533 — 测试域名(echo.direct/proxy/block, baidu.com, google.com) +
+//     zigdns 专用 test-N.com 数字域名族 → 确定性 FakeIP(198.18.x.x / fd18::,MD5 哈希);
+//     localhost → 127.0.0.1/::1;其余转发上游 DNS
 //   - H2 echo :13335 — Go 标准库 ServeTLS(ALPN h2)
 //   - H3 echo :13336 — quic-go http3.Server
 //
@@ -467,6 +467,31 @@ func isTestDomain(domain string) bool {
 	return false
 }
 
+// isNumericTestDomain — zigdns 缓存命中率基准测试专用域名族:test-<digits>.com
+// (test-1.com ~ test-100000.com)。本地确定性 FakeIP 响应,不转发上游,
+// 供大规模缓存命中率测试(100000 连续数字域名负载)使用。
+// 与真实数字域名(如 3.com)无冲突;前缀 test- + 数字 + .com 精确识别。
+func isNumericTestDomain(domain string) bool {
+	const prefix = "test-"
+	const suffix = ".com"
+	if len(domain) <= len(prefix)+len(suffix) {
+		return false
+	}
+	if !strings.HasPrefix(domain, prefix) || !strings.HasSuffix(domain, suffix) {
+		return false
+	}
+	num := domain[len(prefix) : len(domain)-len(suffix)]
+	if len(num) == 0 || len(num) > 6 { // 1..999999 (test-1.com..test-999999.com)
+		return false
+	}
+	for _, c := range num {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func fakeipV4(domain string) net.IP {
 	h := md5.Sum([]byte(domain))
 	return net.IPv4(198, 18, h[0]&0x7F, h[1])
@@ -583,7 +608,7 @@ func handleDns(conn *net.UDPConn, upstream string, realMode bool, realAnswerIP s
 			if query.qtype != 1 && query.qtype != 28 {
 				continue
 			}
-			if query.domain == "localhost" || isTestDomain(query.domain) {
+			if query.domain == "localhost" || isTestDomain(query.domain) || isNumericTestDomain(query.domain) {
 				var ips []net.IP
 				if query.domain == "localhost" || realMode {
 					// real 模式(zigbox 矩阵二级 DNS):测试域名解析真实环回
