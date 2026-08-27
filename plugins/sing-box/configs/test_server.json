@@ -37,6 +37,10 @@
 //   :__TROJAN_PORT__  trojan      — Trojan (TLS)
 //   :__HYSTERIA2_PORT__ hysteria2   — Hysteria2 (QUIC) 主端口
 //   :__VMESS_PORT__ vmess       — VMess (WebSocket)
+//   :__VMESS_TLS_PORT__ vmess+tls — VMess (TLS)
+//   :__VMESS_WS_PORT__ vmess+ws  — VMess (WebSocket)
+//   :__VMESS_WS_TLS_PORT__ vmess+ws+tls — VMess (TLS+WebSocket)
+//   :__VMESS_GRPC_PORT__ vmess+grpc — VMess (TLS+gRPC)
 //   :__VLESS_PORT__ vless       — VLESS (TLS+XTLS)
 //   :__HYSTERIA2_ALT_PORT__ hysteria2   — Hysteria2 (QUIC) 副端口
 //   :__TUIC_PORT__ tuic        — TUIC v5 (QUIC)
@@ -193,6 +197,28 @@
       "transport": {
         "type": "ws",
         "path": "/vmess-ws-tls"
+      }
+    },
+    {
+      "type": "vmess",
+      "tag": "vmess-grpc-in",
+      "listen": "::",
+      "listen_port": __VMESS_GRPC_PORT__,
+      "users": [
+        {
+          "name": "test-user",
+          "uuid": "__VMESS_UUID__",
+          "alterId": 0
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "certs/localhost.crt",
+        "key_path": "certs/localhost.key"
+      },
+      "transport": {
+        "type": "grpc",
+        "service_name": "vmess-grpc"
       }
     },
     {

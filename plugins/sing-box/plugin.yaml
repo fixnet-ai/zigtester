@@ -22,6 +22,7 @@ config:
   vmess_tls_port: 16820
   vmess_ws_port: 16821
   vmess_ws_tls_port: 16822
+  vmess_grpc_port: 16823
   vless_port: 16801
   hysteria2_alt_port: 16802
   tuic_port: 16803
@@ -65,6 +66,7 @@ ports:
   - 16820     # vmess+tls
   - 16821     # vmess+ws
   - 16822     # vmess+ws+tls
+  - 16823     # vmess+grpc
   - 16801     # vless
   - 16802     # hysteria2 alt
   - 16803     # tuic

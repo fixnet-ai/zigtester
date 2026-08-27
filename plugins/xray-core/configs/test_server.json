@@ -138,6 +138,35 @@
       }
     },
     {
+      "tag": "vmess-grpc-in",
+      "listen": "127.0.0.1",
+      "port": __VMESS_GRPC_PORT__,
+      "protocol": "vmess",
+      "settings": {
+        "clients": [
+          {
+            "id": "__VMESS_UUID__",
+            "alterId": 0
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "grpc",
+        "security": "tls",
+        "grpcSettings": {
+          "serviceName": "vmess-grpc"
+        },
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "certs/localhost.crt",
+              "keyFile": "certs/localhost.key"
+            }
+          ]
+        }
+      }
+    },
+    {
       "tag": "vless-tls-in",
       "listen": "127.0.0.1",
       "port": __VLESS_TLS_PORT__,

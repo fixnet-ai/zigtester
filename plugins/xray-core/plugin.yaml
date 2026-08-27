@@ -14,6 +14,7 @@ config:
   vmess_tcp_port: 16920
   vmess_tls_port: 16921
   vmess_ws_tls_port: 16922
+  vmess_grpc_port: 16923
   vless_tls_port: 16901
   vless_ws_port: 16905
   vless_flow_port: 16908
@@ -46,6 +47,7 @@ ports:
   - 16920     # vmess 裸 TCP
   - 16921     # vmess+tls
   - 16922     # vmess+ws+tls
+  - 16923     # vmess+grpc
   - 16901     # vless+tls
   - 16905     # vless+ws
   - 16906     # vless+reality
