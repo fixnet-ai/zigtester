@@ -4,16 +4,18 @@
 > 历史阶段完成记录一律以 task_plan.md「历史完成阶段总表」+ git log 为准，本文件不重复。
 > **二次瘦身（2026-08-23）**：2026-08-18 及更早历史流水已删（task_plan 总表承接）；
 > 技术定论见 findings.md「定论位置表」（已下沉代码注释）。
+> **第四轮瘦身（2026-08-27）**：08-25 A/B/C/D 详情与 task_plan「✅ 已完成」去重（此处留指针）；
+> 08-25 条目中「route.final 兜底 bug」为已撤销推断，修正为最终定论（socks fd 泄漏 → zigoutbounds）。
 
 ## 当前状态
 
-- 分支 `main`。**全部 Phase 1-12 完成**（2026-08-07 → 08-21），最近收尾：插件 host 化（P12）、
+- 分支 `main`。全部 Phase 1-12 完成（2026-08-07 → 08-21），最近收尾：插件 host 化（P12）、
   MCP SSE+progress、per_suite_only、target 资源采集。
-- **性能测试架构重构 A/B/C/D 完成**（08-25，本会话）：参数透传（--args）+ run 自动回归对比（MCP-only）
+- **性能测试架构重构 A/B/C/D 完成**（08-25）：参数透传（--args）+ run 自动回归对比（MCP-only）
   + history 固定报表 + performance-scenarios 层级 + zigbox 迁移。见 task_plan「✅ 已完成」节。
 - 兄弟项目全部接入：zigfoundation / zigbox / zigtun / zigproxy / zigdns / zigoutbounds + zigroute / zigunicfg。
 - zigtester 自身单测全绿：test_args_passthrough 6 + test_env_guard 15 + test_per_suite_only 4 +
-  test_report_history 24 + test_runner_env + test_plugin_ports + test_target_monitor。
+  test_report_history 32 + test_runner_env + test_plugin_ports + test_target_monitor。
 
 ## 近期定论（2026-08-18 → 08-26）
 
@@ -28,10 +30,9 @@
   hy2 success_count 266471@40s → 65594@10s 误报 -40%，req/s 稳定 ~6.6k 无退化）。修复 =
   `check_regression` 对总量指标按 `duration_s` 归一化到每秒速率再对比（`_DURATION_SCALED_METRICS`
   + `_duration_of`）；无 duration 的旧记录不归一化（向后兼容）。test_report_history 24→27 全绿。
-- **08-25 性能测试架构重构落地 + 端到端验证**：4 层级确认；bench-standard-inbound PASS（641 req/s）；
-  bench-long-socks5 PASS 且 analyze_leak 显式生效（rss_growth/fd_growth 进 metrics）+ 跨层级基线保留
-  （回归基线取旧 performance 历史）。**bench-standard-outbound FAIL = zigbox 数据路径 bug**（route.final
-  兜底非 direct 出站未覆盖，fd 耗尽 + 重量出站请求 30s 挂起），诊断见 findings §10，交回 zigbox。
+- **08-25 性能测试架构重构落地 + 端到端验证**：见 task_plan「✅ 已完成」。**bench-standard-outbound
+  遗留 = socks/socks-xray fd 耗尽（zigbox socks 出站连接泄漏）**，已移交 zigoutbounds 跟踪；
+  redirect 为 Linux 平台不支持（已加守卫）；重量出站挂起经 CL 语义（read_by_cl）修复。
   history.py `_is_metric_regression` 修复（吞吐关键词补 req_s，修 req_s 上升 136.8% 误标回归）。
 - **08-23 target 字段**：只采目标被测程序（bench-long-direct peak 8.2 / avg 8.1MB 与 psutil 探针吻合，
   launchd.log 无 fallback warning）；5 项目 48 处 target 补齐（zigbox/zigdns/zigproxy/zigtun/zigunicfg）。

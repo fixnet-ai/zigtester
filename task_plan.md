@@ -7,23 +7,10 @@
 > 同步二次瘦身：findings.md 440→72 行、progress.md 405→46 行（久远流水/错误方向已删，
 > 技术定论已在代码头部注释，findings 只留指针表）。**已删章节锚点一律以 git log 为准。**
 > 本文档只承载仍在生效的决策；未完成任务已移交 zigbox 统一规划（zigbox task_plan.md『跨项目统一待办』）。
-
-## 当前状态（2026-08-25）
-
-- **性能测试架构重构（A/B/C/D）全部完成 + 端到端验证**（本会话，workflow wf_34457971-32e）：
-  - **A 参数透传**：`--args` 追加命令尾部 + 非标准参数不存历史（决策 D1 互斥）；test_args_passthrough 6/6
-  - **B run 自动回归对比**（MCP-only）：save 前对 performance/performance-scenarios PASS+metrics 套件算 check_regression；
-    过滤泄漏键（D2）；bench-long-socks5 端到端正确渲染 4 条红字回归
-  - **C history 固定报表**：compact_history 三态 + print_history markdown 分支 + 组视图按成员预计算；test_report_history 24/24
-  - **D performance-scenarios 层级**：VALID_LEVELS/schema/list 3 处；zigbox 12 旧套件迁入 + analyze_leak 显式生效
-    （bench-long-socks5 metrics 含 rss_growth/fd_growth）；**跨层级基线保留**（旧 performance 历史仍作回归基线）
-  - **history.py `_is_metric_regression` 修复**：吞吐关键词补 `req_s`（req_s 上升 136.8% 曾被误标回归）
-- **history.py 回归检测 duration 归一化（08-25）**：bench-long 总量指标（success_count/total_requests/
-  error_count）按 duration_s 归一化到每秒速率再对比，修复 --duration 40s→10s 被误判为吞吐回归
-  （hy2 success_count 266471@40s → 65594@10s 误报 -40%，实际 req/s 稳定无退化）。test_report_history
-  24→27 全绿。
-- **zigtester 自身单测全绿**：test_args_passthrough 6 + test_env_guard 15 + test_per_suite_only 4 + test_report_history 27 + test_runner_env + test_plugin_ports + test_target_monitor。
-- **兄弟项目全部接入 zigtester**：zigfoundation/zigbox/zigtun/zigproxy/zigdns/zigoutbounds + zigroute/zigunicfg。
+>
+> **第四轮瘦身（2026-08-27）**：「当前状态」与「A/B/C/D 已完成」合并去重；遗留节压缩为
+> 跨项目指针；findings §9 端口清单改为指向 plugins/*/plugin.yaml（唯一真相源）、
+> §10 诊断长文凝练为最终定论 + 被推翻假设移入「错误方向记录」。
 
 ## ✅ 已完成：性能测试架构重构（A/B/C/D，2026-08-25）
 
@@ -33,28 +20,50 @@
 > 与「关键生效决策 · 压测禁止 `--level` 全量」不冲突：per_suite_only 约束的是默认 performance 层，
 > 独立层级内全量可跑是本次新裁定。
 
+- **A 参数透传**：`--args` 追加命令尾部 + 非标准参数不存历史（决策 D1 互斥）；test_args_passthrough 6/6
+- **B run 自动回归对比**（MCP-only）：save 前对 performance/performance-scenarios PASS+metrics 套件算
+  check_regression；过滤泄漏键（D2）；bench-long-socks5 端到端正确渲染 4 条红字回归
+- **C history 固定报表**：compact_history 三态 + print_history markdown 分支 + 组视图按成员预计算；
+  test_report_history 24/24
+- **D performance-scenarios 层级**：VALID_LEVELS/schema/list 3 处；zigbox 12 旧套件迁入 +
+  analyze_leak 显式生效（bench-long-socks5 metrics 含 rss_growth/fd_growth）；
+  **跨层级基线保留**（旧 performance 历史仍作回归基线，runs 按 (project,suite) 键不丢）
+
 **验收结果**：
 - `zigtester_list zigbox` 确认 4 层级（unit/functional/performance/performance-scenarios）✓
 - `bench-standard-inbound` PASS（641 req/s, p99 2.8ms）✓
-- `bench-long-socks5`（performance-scenarios）PASS：7922 req/s, p99 6.4ms, 0 错误；metrics 含
-  `rss_growth_mb/fd_growth/cpu_head_pct/cpu_tail_pct` → **analyze_leak 显式生效**（level 迁移后）✓
-- **跨层级基线保留**：regressions 基线取旧 performance 层历史（10781 req/s）→ runs 按 (project,suite)
-  键，迁移不丢基线 ✓
-- MCP 端到端：zigtester_run 返回 4 层级 + regressions 字段 + report 回归节；zigtester_history 单套件/
-  组视图 report + 空态 ✓
-- zigtester 自身单测全绿（见当前状态节）✓
+- `bench-long-socks5`（performance-scenarios）PASS：7922 req/s, p99 6.4ms, 0 错误；
+  analyze_leak 显式生效 + 跨层级基线（旧 performance 层历史 10781 req/s 作回归基线）✓
+- MCP 端到端：run 返回 4 层级 + regressions 字段 + report 回归节；history 单套件/组视图 report + 空态 ✓
 
-## ⚠️ 遗留：bench-standard-outbound 仅剩 socks/socks-xray 连接泄漏（交回 zigbox）
+**附带修复**：
+- `_is_metric_regression` 吞吐关键词补 `req_s`（req_s 上升 136.8% 曾被误标回归）
+- 回归检测 duration 归一化（08-25）：总量指标（success_count/total_requests/error_count）按
+  duration_s 归一化到每秒速率再对比，防 `--duration` 40s→10s 被误判为吞吐回归
+  （hy2 success_count 266471@40s → 65594@10s 误报 -40%，实际 req/s 稳定 ~6.6k 无退化）。
+  test_report_history 24→27 全绿。
+- 回归检测基线三重过滤（08-26，zigdns 审查发现）：短 duration 启动瞬态 / 陈旧记录时间窗口 /
+  延迟亚毫秒噪声 guard → `_is_short_duration`/`_is_stale`/`_is_latency_metric`；test_report_history
+  27→32 全绿。详见 progress.md 近期定论。
 
-> **处置进展（08-25，详见 zigbox task_plan #89）**：
-> - **EOF 语义定案**：重量出站 30s 挂起 = HTTP 客户端等 EOF 而 sing-box 不转发上游 FIN → CL 语义
->   （`read_by_cl` 默认开）后全部重量出站 PASS ✅
+## ⚠️ 遗留：bench-standard-outbound socks/socks-xray 连接泄漏（交 zigoutbounds）
+
+> 处置进展（08-25，详见 zigbox task_plan #89 + zigoutbounds findings §52）：
+> - **EOF 语义定案**：重量出站 30s 挂起 = HTTP 客户端等 EOF 而 sing-box 不转发上游 FIN →
+>   CL 语义（`test_bench.read_by_cl` 默认开）后全部重量出站 PASS ✅
 > - **ss-xray 剔除（用户裁定）**：zigbox SS 客户端 ↔ xray 2022-blake3 握手不兼容，剔除非修复 ✅
-> - **redirect 平台守卫已落地**：`bench_outbound_cells()` 非 Linux 不枚举 ✅
-> - **剩余**：socks/socks-xray 确定性 fd 耗尽（24593 `accept failed: ProcessFdQuotaExceeded`，
->   679 成功请求 ×3 fd ≈ 2048 不释放）→ zigbox socks 出站连接泄漏，**已移交 zigoutbounds 跟踪**
->   （zigoutbounds task_plan『⚠️ 遗留』+ findings §52）。套件修复前持续 FAIL，
->   勿改 zigtester 侧掩盖。完整诊断见 findings §10。
+> - **redirect 平台守卫已落地**：`bench_outbound_cells()` 非 Linux 不枚举（macOS 为平台不支持）✅
+> - **剩余（确定性复现 ×2）**：socks/socks-xray fd 耗尽（24593 `accept failed: ProcessFdQuotaExceeded`，
+>   679 成功请求 ×3 fd ≈ 2048 不释放）→ zigbox socks 出站连接泄漏，**已移交 zigoutbounds 跟踪**。
+>   套件修复前持续 FAIL，勿改 zigtester 侧掩盖。完整诊断见 findings §10。
+
+## 当前状态（2026-08-27）
+
+- 分支 `main`，全部 Phase 1-12 完成（2026-08-07 → 08-21）+ A/B/C/D 性能架构重构完成（08-25）。
+- zigtester 自身单测全绿：test_args_passthrough 6 + test_env_guard 15 + test_per_suite_only 4 +
+  test_report_history 32 + test_runner_env + test_plugin_ports + test_target_monitor。
+- 兄弟项目全部接入 zigtester：zigfoundation/zigbox/zigtun/zigproxy/zigdns/zigoutbounds +
+  zigroute/zigunicfg。
 
 ## 历史完成阶段总表（Phase 1-12，全部完成）
 

@@ -13,6 +13,10 @@ import yaml
 # ── 数据模型 ──────────────────────────────────────────────
 
 DEFAULT_TIMEOUT = 120
+# 4 层级（2026-08-25 A/B/C/D 新增 performance-scenarios）：压力/疲劳/分流场景独立层，
+# per_suite_only 只约束默认 performance 层全量，独立层内全量可跑。注意 analyze_leak
+# 自动开仅匹配 level=='performance'（见 _parse_suite），迁入 performance-scenarios 的
+# 长时套件须显式设 analyze_leak: true。
 VALID_LEVELS = ("unit", "functional", "performance", "performance-scenarios")
 VALID_PARSERS = ("zig_test", "line_count", "test_protocols", "bench", "custom")
 VALID_STATUSES = ("PASS", "FAIL", "SKIP", "ERROR")
