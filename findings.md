@@ -223,6 +223,11 @@ async 工具 + `asyncio.to_thread` + 每 10s `report_progress` 心跳（progress
 ### D. 插件设计决策（详见 task_plan.md 本次阶段）
 
 - 复用 `singbox_ctl.py` / `xray_ctl.py` 的 `serve` 模式：`cfdev_ctl.py` 渲染 wrangler 项目 + 启 `wrangler dev`。
-- 依赖：Node 24 + npx（wrangler 4.127 已随 proxy 装好；首跑 `wrangler dev` 会再拉 workerd 二进制，需一次网络）。
+- 依赖：Node 24 + npx（wrangler 4.127 已随 proxy 装好；workerd 二进制已缓存于 ~/.npm/_npx/，
+  实测首跑无需网络，见 C.7）。
 - 端口：workers 18787 / pages 18788（避开 8787/8788 官方默认，防本机冲突）。
 - worker 源：经 config 引用 `vendor/Cloudflare-vless-trojan/.../_worker明.js`（唯一真相源在 vendor，插件内不复制 2465 行混淆 JS）。
+- **协议覆盖边界（定论）**：插件只覆盖 VLESS / Trojan 两种 worker（`worker_type: vless|trojan`）。
+  vendor 第三套 `s5http_wkpgs/`（Socks5/HTTP over WS）**不接入**——socks5/http 入站测试已由
+  sing-box 插件原生覆盖，本地 CF 无需重复。二者分工：sing-box 测原生 socks5/http，
+  local-cf-dev 专测 CF 特有的 VLESS/Trojan-over-WS 生产形态。
