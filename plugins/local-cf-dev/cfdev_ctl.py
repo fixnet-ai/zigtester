@@ -12,6 +12,15 @@ PLUGIN_VENDOR_WORKER_DIR 覆盖；本插件不复制 2465 行混淆 JS。
 - 一律用 127.0.0.1（localhost 有 IPv4/IPv6 二义，workers-sdk PR #12913）。
 - ECH 本地不可测（workerd 不做 ECH 终止，ECH 是 CF 边缘能力，与 worker 无关）。
 - worker 会把 IPv4 目标重写为 sslip.io → E2E 客户端须用域名目标（localhost）。
+
+真实部署到 Cloudflare（本插件只做本地 dev；真连 CF 边缘时用 vendor 项目原部署流程）：
+- 环境搭建：Node.js 18+；wrangler 经 npx 提供（`npx wrangler dev` 本地调试，无需全局安装）。
+- 更新上传（一次性认证 + 一键部署）：
+  1. `npx wrangler login` — 浏览器授权一次，本机获得 CF 账号凭证。
+  2. Workers：`npx wrangler deploy` — 读 wrangler.toml 上传到 workers.dev，打印公网 URL；
+     Pages：`npx wrangler pages deploy <静态目录>` — 首次交互选「新建项目」+ 命名。
+  3. 云端密钥：`.dev.vars` 不会随部署上传，`npx wrangler secret put <KEY>` 手动添加
+     （或 CF 后台「环境变量」）；D1/KV/R2 绑定同理需云端同名资源，wrangler 会提示自动创建。
 """
 
 from __future__ import annotations
