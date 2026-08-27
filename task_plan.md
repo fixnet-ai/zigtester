@@ -57,13 +57,78 @@
 >   679 成功请求 ×3 fd ≈ 2048 不释放）→ zigbox socks 出站连接泄漏，**已移交 zigoutbounds 跟踪**。
 >   套件修复前持续 FAIL，勿改 zigtester 侧掩盖。完整诊断见 findings §10。
 
-## 当前状态（2026-08-27）
+## 当前状态（2026-08-28）
 
 - 分支 `main`，全部 Phase 1-12 完成（2026-08-07 → 08-21）+ A/B/C/D 性能架构重构完成（08-25）。
 - zigtester 自身单测全绿：test_args_passthrough 6 + test_env_guard 15 + test_per_suite_only 4 +
   test_report_history 32 + test_runner_env + test_plugin_ports + test_target_monitor。
 - 兄弟项目全部接入 zigtester：zigfoundation/zigbox/zigtun/zigproxy/zigdns/zigoutbounds +
   zigroute/zigunicfg。
+- **进行中：local-cf-dev 插件（Phase 13）**——见下节。
+
+## Phase 13：local-cf-dev 插件（2026-08-28，进行中）
+
+> 目标：本地部署 CF Workers/Pages 代理（yonggekkk/Cloudflare-vless-trojan 的 VLESS/Trojan-over-WS
+> worker），经 `wrangler dev`（workerd 运行时）离线跑 zigbox/zigoutbounds 的 VLESS/Trojan+WS(+TLS)
+> 协议 E2E。调研定论见 findings §11（含 ECH 本地不可测 + IPv4 目标 sslip.io 重写等关键事实）。
+
+### 落地状态（2026-08-28）
+
+**已落地（离线验证通过）**：
+- `plugins/local-cf-dev/plugin.yaml`（config 端口/凭证真相源 + build + lifecycle）
+- `plugins/local-cf-dev/cfdev_ctl.py`（serve/render 模式，同 singbox_ctl/xray_ctl 惯式）
+- `plugins/local-cf-dev/README.md`（用法 + ECH 局限 + 离线数据路径）
+- `plugins/plugin_ports.py` 增 `cfdev_*` 派生函数（`cfdev_workers_port`/`cfdev_pages_port`/
+  `cfdev_uuid`/`cfdev_trojan_password`/`cfdev_local_protocol`）
+
+**已验证**：py_compile 通过；`parse_plugin_config` + `discover_plugins` 正确解析/发现；
+`render` 模式正确渲染 wrangler.toml + .dev.vars + 拷贝 worker（vendor 路径解析到
+`fixnet/vendor/Cloudflare-vless-trojan/Vless_workers_pages/_worker明.js`）；plugin_ports 6 派生值正确。
+
+**剩余（待办，勿在本次混入）**：
+- 实测 `wrangler dev` 启动（首跑需网络拉 workerd 二进制，npx 缓存后离线）——需人工跑一次确认端口 18787 就绪。
+- 消费方接入：zigbox/zigoutbounds `zigtester.yaml` 加 `plugins: [local-cf-dev]` + 相应 VLESS/Trojan+WS 套件
+  （客户端目标地址须用域名 `localhost`，见 findings §11 C.4）。
+- ECH：本地不可测，文档化于 README；如需测 ECH 属「真连 CF 边缘」另一类场景，非本插件范围。
+
+### 设计
+
+**插件形态**（复用 sing-box/xray 的 `serve` ctl 模式）：
+```
+zigtester/plugins/local-cf-dev/
+  plugin.yaml        # name/config/ports/build/lifecycle
+  cfdev_ctl.py       # 渲染 wrangler 项目 + 启 wrangler dev（serve 模式）
+  README.md          # 用法 + ECH 局限说明
+```
+
+**plugin.yaml config 段（端口/凭证唯一真相源）**：
+- `workers_port: 18787` / `pages_port: 18788`（避开官方 8787/8788）
+- `uuid: 86c50e3a-5b87-49dd-bd20-03c7f2735e40`（与 worker 默认一致）
+- `trojan_password: trojan`
+- `local_protocol: http|https`（TLS 模式切 https）
+- `vendor_worker_dir`（worker 源路径，默认 `../vendor/Cloudflare-vless-trojan`）
+- `echo_host: 127.0.0.1`（VLESS 目标域名 `localhost` 解析到的本地 echo）
+
+**lifecycle**：`build.command = "npx wrangler --version"`（存在性检查，同 sing-box/xray 模式）；
+`start = python3 cfdev_ctl.py serve`；`ready_on: tcp 127.0.0.1:18787`。
+
+**cfdev_ctl.py 职责**：
+1. 把 `vendor/.../Vless_workers_pages/_worker明.js` 拷到临时 workdir（`/tmp/zigtester-cfdev/`）
+2. 渲染 `wrangler.toml`（`main`/`compatibility_date`/`[dev] port+local_protocol`）+ `.dev.vars`（uuid/proxyip）
+3. `subprocess.Popen("npx wrangler dev ...")` 阻塞直到停止信号（同 singbox_ctl serve）
+4. 探活：`wrangler dev` 就绪后 TCP 探测 workers_port
+
+**E2E 数据路径**（离线闭环）：
+zigbox vless+ws 客户端 → 127.0.0.1:18787（workerd）→ worker 解析 VLESS 头 →
+`connect({hostname:"localhost"})` → 127.0.0.1:13333（local-echo echo）→ 回程。
+
+**边界/待办**：
+- ECH 本地不可测（findings §11 C.5）——插件覆盖 WS+TLS（非 ECH）；ECH 文档化。
+- ~~首跑需一次网络拉 workerd 二进制~~ → **已实测（08-28）无需网络**：workerd 已在 `~/.npm/_npx/`
+  缓存（`npx wrangler --version` 时已拉取）。wrangler dev 三层验证全绿（render/冒烟/relay），
+  详见 findings §11 C.7。
+- 消费方接入（剩余）：zigbox/zigoutbounds `zigtester.yaml` 加 `plugins: [local-cf-dev]` + 相应套件；
+  plugin_ports.py 已增 `cfdev_*` 派生函数（`cfdev_workers_port()` 等 5 个）。
 
 ## 历史完成阶段总表（Phase 1-12，全部完成）
 

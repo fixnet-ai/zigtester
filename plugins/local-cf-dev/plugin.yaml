@@ -1,0 +1,47 @@
+name: local-cf-dev
+description: "本地部署 CF Workers 代理（yonggekkk/Cloudflare-vless-trojan 的 VLESS/Trojan-over-WS worker）— 经 wrangler dev（workerd 运行时）离线跑 zigbox/zigoutbounds 的 VLESS/Trojan+WS(+TLS) 协议 E2E。ECH 本地不可测（workerd 不做 ECH 终止，ECH 是 CF 边缘能力，见 README）"
+
+# 端口/凭证真相源（生态级）: 本段是 local-cf-dev 插件全部端口与凭证的唯一权威。
+# 各项目 tests/config.py 经 plugins/plugin_ports.py 从这里派生,禁止各自硬编码。
+# lifecycle.start.command 用 ${PLUGIN_<KEY>:-<默认>} 引用本段,保证运行命令与 config 段永不失步。
+config:
+  workers_port: 18787      # VLESS worker（wrangler dev）监听端口，避开官方 8787
+  pages_port: 18788        # Pages worker 监听端口（预留），避开官方 8788
+  local_protocol: "http"   # http | https — https 供 vless+ws+tls 客户端连入（自签名证书）
+  worker_type: "vless"     # vless | trojan — 选择 vendor 中哪套 worker
+  uuid: "86c50e3a-5b87-49dd-bd20-03c7f2735e40"  # 与 worker 默认 uuid 一致
+  trojan_password: "trojan"                     # 与 worker 默认密码一致
+  echo_host: "127.0.0.1"   # E2E 目标域名 localhost 解析到的本地 echo（实际目标由客户端 VLESS 头决定）
+  # TLS 模式（local_protocol: https）复用的本地自签名证书 — 生态统一 localhost 证书
+  # （SAN 含 DNS:localhost + IP:127.0.0.1，PKCS#8 私钥，与 local-echo/sing-box/xray 同源）。
+  # 经 wrangler dev --https-cert-path/--https-key-path 注入。相对路径以插件目录为基准。
+  https_cert_path: "../local-echo/certs/localhost.crt"
+  https_key_path: "../local-echo/certs/localhost.key"
+  # worker 源（唯一真相源在 vendor，插件内不复制混淆 JS）。相对路径以插件目录为基准；
+  # 也可用绝对路径覆盖。
+  vendor_worker_dir: "../../../vendor/Cloudflare-vless-trojan"
+
+# 监听端口列表 — 用于 zigtester 端口冲突预检 + 每套件前环境自检（端口归属校验）
+ports:
+  - 18787     # VLESS worker（wrangler dev）
+  - 18788     # Pages worker（预留）
+
+build:
+  # wrangler 经 npx 提供（Node 24 已装）。此命令用作存在性检查；失败时 zigtester 标记插件不可用。
+  # 首跑 `wrangler dev` 会再拉 workerd 二进制，需一次网络；npx 缓存后离线可用。
+  command: "npx wrangler --version"
+
+lifecycle:
+  start:
+    # 端口取自 config 段（zigtester 注入 PLUGIN_* 环境变量），${VAR:-默认} 兜底独立手动运行。
+    command: "python3 cfdev_ctl.py serve"
+    timeout: 60
+    ready_on:
+      type: tcp
+      port: 18787
+      host: "127.0.0.1"
+  stop:
+    timeout: 15
+    kill:
+      - "wrangler"
+      - "workerd"

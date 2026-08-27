@@ -263,3 +263,31 @@ def xray_credential(key: str) -> str:
 def xray_readiness_port() -> int:
     """xray 插件 readiness 探针端口（config.readiness_port）。"""
     return config_port("xray-core", "readiness_port")
+
+
+# ── local-cf-dev 插件 ──────────────────────────────────────────
+
+
+def cfdev_workers_port() -> int:
+    """local-cf-dev VLESS worker 端口（wrangler dev 监听）。"""
+    return config_port("local-cf-dev", "workers_port")
+
+
+def cfdev_pages_port() -> int:
+    """local-cf-dev Pages worker 端口（预留）。"""
+    return config_port("local-cf-dev", "pages_port")
+
+
+def cfdev_uuid() -> str:
+    """local-cf-dev VLESS worker 默认 uuid。"""
+    return config_credential("local-cf-dev", "uuid")
+
+
+def cfdev_trojan_password() -> str:
+    """local-cf-dev Trojan worker 默认密码。"""
+    return config_credential("local-cf-dev", "trojan_password")
+
+
+def cfdev_local_protocol() -> str:
+    """local-cf-dev 本地协议（http | https，https 供 vless+ws+tls 客户端连入）。"""
+    return config_credential("local-cf-dev", "local_protocol")

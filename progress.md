@@ -19,6 +19,23 @@
 
 ## 近期定论（2026-08-18 → 08-26）
 
+- **08-28 local-cf-dev 插件（Phase 13）落地**：查证 `local-cf-dev.md`（基本属实，是通用 CF 本地
+  开发教程；对离线 E2E 目标缺两点：未提 `cloudflare:sockets connect()`、完全没提 ECH）+
+  设计并落地 `local-cf-dev` 插件（plugin.yaml + cfdev_ctl.py + README + plugin_ports 6 派生函数）。
+  离线验证：py_compile / 插件发现解析 / render 渲染 / plugin_ports 全过。关键定论见 findings §11
+  （ECH 本地不可测 = workerd 不做 ECH 终止；worker 把 IPv4 目标重写 sslip.io → E2E 客户端须用
+  域名目标；本地 workerd 支持 connect() 且不拦回环；localhost 有 IPv4/IPv6 二义须用 127.0.0.1）。
+  剩余：实测 `wrangler dev`（首跑需网络拉 workerd）+ 消费方 zigbox/zigoutbounds 接入。
+  **08-28 补充：localhost 证书系统信任已落地**（`security add-trusted-cert -r trustRoot` 系统 Keychain，
+  exit=0）。Apple curl（/usr/bin/curl，SecureTransport）`https://localhost` → 200 信任；
+  Homebrew curl（LibreSSL，编译 CAfile=`/etc/ssl/cert.pem` 非 Homebrew bundle）经 **~/.curlrc 合并副本**
+  （`cat /etc/ssl/cert.pem localhost.crt`）双向实测 localhost/example.com 均 200；
+  Safari/Chrome 信任、Firefox 需 enterprise_roots.enabled。定论见 findings §11 C.6。
+  **08-28 实测 wrangler dev 三层全绿**（subagent 验证）：render（wrangler.toml/src/.dev.vars 正确）→
+  冒烟（`Ready on 127.0.0.1:18787`，非 WS GET 200）→ relay（VLESS 头 32 字节解析 + payload 原样回显）。
+  关键：workerd 已在 `~/.npm/_npx/` 缓存，首跑**无需网络**（修正此前「首跑需一次网络」结论）。
+  临时脚本 `/tmp/cfdev_echo_server.py` + `/tmp/cfdev_vless_ws_client.py` 可复用。定论见 findings §11 C.7。
+
 - **08-26 回归检测基线三重过滤修复**（zigdns 审查发现）：bench 吞吐回归被历史基线污染误报 ↓73%~98%。
   三重根因 + 修复（`history.py` `check_regression`）：
   ① 短-duration 启动瞬态 → `_is_short_duration`（剔除 duration_ms < 2s）；
