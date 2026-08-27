@@ -5,13 +5,13 @@ description: "本地部署 CF Workers 代理（yonggekkk/Cloudflare-vless-trojan
 # 各项目 tests/config.py 经 plugins/plugin_ports.py 从这里派生,禁止各自硬编码。
 # lifecycle.start.command 用 ${PLUGIN_<KEY>:-<默认>} 引用本段,保证运行命令与 config 段永不失步。
 config:
-  workers_port: 18787      # VLESS worker（wrangler dev）监听端口，避开官方 8787
-  pages_port: 18788        # Pages worker 监听端口（预留），避开官方 8788
-  local_protocol: "http"   # http | https — https 供 vless+ws+tls 客户端连入（自签名证书）
-  worker_type: "vless"     # vless | trojan — 选择 vendor 中哪套 worker
-  uuid: "86c50e3a-5b87-49dd-bd20-03c7f2735e40"  # 与 worker 默认 uuid 一致
-  trojan_password: "trojan"                     # 与 worker 默认密码一致
-  echo_host: "127.0.0.1"   # E2E 目标域名 localhost 解析到的本地 echo（实际目标由客户端 VLESS 头决定）
+  vless_workers_port: 18787   # VLESS worker（wrangler dev）监听端口，避开官方 8787
+  trojan_workers_port: 18789  # Trojan worker（wrangler dev）监听端口（双 worker 常驻，独立端口）
+  pages_port: 18788           # Pages worker 监听端口（预留），避开官方 8788
+  local_protocol: "http"      # http | https — https 供 vless+ws+tls 客户端连入（自签名证书）
+  uuid: "86c50e3a-5b87-49dd-bd20-03c7f2735e40"  # 与 vless worker 默认 uuid 一致
+  trojan_password: "trojan"                     # 与 trojan worker 默认密码一致
+  echo_host: "127.0.0.1"      # E2E 目标域名 localhost 解析到的本地 echo（实际目标由客户端 VLESS 头决定）
   # TLS 模式（local_protocol: https）复用的本地自签名证书 — 生态统一 localhost 证书
   # （SAN 含 DNS:localhost + IP:127.0.0.1，PKCS#8 私钥，与 local-echo/sing-box/xray 同源）。
   # 经 wrangler dev --https-cert-path/--https-key-path 注入。相对路径以插件目录为基准。
@@ -24,6 +24,7 @@ config:
 # 监听端口列表 — 用于 zigtester 端口冲突预检 + 每套件前环境自检（端口归属校验）
 ports:
   - 18787     # VLESS worker（wrangler dev）
+  - 18789     # Trojan worker（wrangler dev）
   - 18788     # Pages worker（预留）
 
 build:

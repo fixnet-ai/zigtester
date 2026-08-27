@@ -29,12 +29,15 @@ zigbox vless+ws 客户端
 ```bash
 # 消费方项目 zigtester.yaml 声明插件（自动 build + start + 自检 + stop）
 plugins:
-  - local-cf-dev                # 默认 vless worker，http 模式，端口 18787
+  - local-cf-dev                # 双 worker 常驻：VLESS :18787 + Trojan :18789，http 模式
   # - name: local-cf-dev
   #   config:
-  #     local_protocol: https   # vless+ws+tls 场景
-  #     worker_type: trojan     # 切 Trojan worker
+  #     local_protocol: https   # vless+ws+tls 场景（双 worker 同时 https）
 ```
+
+VLESS 与 Trojan 是两个独立 HTTP 端点（各自独立端口），wrangler 不支持单 config 双脚本
+（单命令多 `-c` 时仅 primary 暴露 HTTP URL）——故 `cfdev_ctl.py` 管理两个 `wrangler dev`
+子进程，每个 worker 渲染独立 workdir + wrangler.toml + .dev.vars + 端口（见 `WORKERS`）。
 
 ## 关键事实（务必知悉）
 

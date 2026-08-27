@@ -268,9 +268,14 @@ def xray_readiness_port() -> int:
 # ── local-cf-dev 插件 ──────────────────────────────────────────
 
 
-def cfdev_workers_port() -> int:
+def cfdev_vless_port() -> int:
     """local-cf-dev VLESS worker 端口（wrangler dev 监听）。"""
-    return config_port("local-cf-dev", "workers_port")
+    return config_port("local-cf-dev", "vless_workers_port")
+
+
+def cfdev_trojan_port() -> int:
+    """local-cf-dev Trojan worker 端口（wrangler dev 监听）。"""
+    return config_port("local-cf-dev", "trojan_workers_port")
 
 
 def cfdev_pages_port() -> int:

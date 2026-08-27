@@ -7,6 +7,11 @@
 worker 源：默认引用 vendor/Cloudflare-vless-trojan（唯一真相源），经
 PLUGIN_VENDOR_WORKER_DIR 覆盖；本插件不复制 2465 行混淆 JS。
 
+**双 worker 常驻（阶段 27.2 收尾，2026-08-28）**：VLESS 与 Trojan 是两个独立的 HTTP 端点
+（各自独立端口），wrangler 不支持「单 config 双脚本」（且单命令多 `-c` 时仅 primary 暴露
+HTTP URL，auxiliary 只能经 service bindings 访问）——故本控制器管理**两个** `wrangler dev`
+子进程，每个 worker 渲染一份独立 workdir + 独立 wrangler.toml + 独立 .dev.vars + 独立端口。
+
 关键事实（详见 README + zigtester findings §11）：
 - workerd 本地支持 `cloudflare:sockets connect()`，且本地模式不拦回环地址。
 - 一律用 127.0.0.1（localhost 有 IPv4/IPv6 二义，workers-sdk PR #12913）。
@@ -30,8 +35,10 @@ import logging
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
+import threading
 import time
 
 logger = logging.getLogger("cfdev")
@@ -45,8 +52,8 @@ DEFAULT_VENDOR_DIR = os.path.normpath(
     os.path.join(PLUGIN_DIR, "../../../vendor/Cloudflare-vless-trojan")
 )
 
-# 临时 workdir（渲染 wrangler 项目 + 拷贝 worker；每次 serve 重建）
-WORKDIR = "/tmp/zigtester-cfdev"
+# 临时 workdir 基名（每个 worker 一个独立 workdir：<BASE>-vless / <BASE>-trojan；每次 serve 重建）
+WORKDIR_BASE = "/tmp/zigtester-cfdev"
 
 # TLS 模式（local_protocol: https）复用的生态 localhost 证书（与 local-echo/sing-box/xray 同源）
 DEFAULT_CERT_PATH = os.path.normpath(
@@ -56,11 +63,33 @@ DEFAULT_KEY_PATH = os.path.normpath(
     os.path.join(PLUGIN_DIR, "../local-echo/certs/localhost.key")
 )
 
-# 各 worker_type 对应的 vendor 源文件与 .dev.vars 键
-WORKER_SOURCE = {
-    "vless": ("Vless_workers_pages", "_worker明.js", "uuid"),
-    "trojan": ("Trojan_workers_pages", "_worker明.js", "pswd"),
-}
+# 双 worker 常驻：VLESS + Trojan 各一个 wrangler dev 子进程、各自独立端口/独立 workdir。
+# 每个 worker 描述其 vendor 源文件、.dev.vars 键、plugin.yaml config 端口键/凭证键。
+WORKERS = [
+    {
+        "key": "vless",
+        "subdir": "Vless_workers_pages",
+        "filename": "_worker明.js",
+        "dev_key": "uuid",                  # .dev.vars 键（worker 经 env.<key> 读）
+        "port_key": "vless_workers_port",  # plugin.yaml config 端口键
+        "secret_key": "uuid",               # plugin.yaml config 凭证键
+        "compatibility_date": "2024-01-01",  # VLESS 不用 Node 内置模块，保持已验证 PASS 的原值
+        "compatibility_flags": [],
+    },
+    {
+        "key": "trojan",
+        "subdir": "Trojan_workers_pages",
+        "filename": "_worker明.js",
+        "dev_key": "pswd",
+        "port_key": "trojan_workers_port",
+        "secret_key": "trojan_password",
+        # 内嵌 js-sha256 用 require("crypto")/require("buffer")（Node 内置），esbuild 静态
+        # 解析不到 → 构建失败。nodejs_compat 须配合 compatibility_date >= 2024-09-23 才进
+        # 入 v2 模式解析「裸 require」（v1 模式只解析 node: 前缀）。实测 wrangler 4.127。
+        "compatibility_date": "2024-09-23",
+        "compatibility_flags": ["nodejs_compat"],
+    },
+]
 
 # ── 配置读取（PLUGIN_* 环境变量 ← plugin.yaml config 段）──────────
 
@@ -72,10 +101,10 @@ def _env(key: str, default: str) -> str:
 def load_config() -> dict:
     """从 PLUGIN_* 环境变量读取插件配置（含默认值，独立手动运行兜底）。"""
     return {
-        "workers_port": int(_env("workers_port", "18787")),
+        "vless_workers_port": int(_env("vless_workers_port", "18787")),
+        "trojan_workers_port": int(_env("trojan_workers_port", "18789")),
         "pages_port": int(_env("pages_port", "18788")),
         "local_protocol": _env("local_protocol", "http"),
-        "worker_type": _env("worker_type", "vless"),
         "uuid": _env("uuid", "86c50e3a-5b87-49dd-bd20-03c7f2735e40"),
         "trojan_password": _env("trojan_password", "trojan"),
         "echo_host": _env("echo_host", "127.0.0.1"),
@@ -100,16 +129,10 @@ def _resolve_vendor_dir(cfg: dict) -> str:
     return _resolve_path(cfg["vendor_worker_dir"])
 
 
-def _worker_source_path(cfg: dict) -> str:
-    """定位选中 worker 的源文件路径；缺失抛错（给出明确指引）。"""
-    worker_type = cfg["worker_type"]
-    if worker_type not in WORKER_SOURCE:
-        raise ValueError(
-            f"未知 worker_type: {worker_type!r}（可用: {sorted(WORKER_SOURCE)}）"
-        )
-    subdir, filename, _dev_key = WORKER_SOURCE[worker_type]
+def _worker_source_path(worker: dict, cfg: dict) -> str:
+    """定位单个 worker 的源文件路径；缺失抛错（给出明确指引）。"""
     vendor_dir = _resolve_vendor_dir(cfg)
-    path = os.path.join(vendor_dir, subdir, filename)
+    path = os.path.join(vendor_dir, worker["subdir"], worker["filename"])
     if not os.path.isfile(path):
         raise FileNotFoundError(
             f"worker 源缺失: {path}\n"
@@ -119,39 +142,49 @@ def _worker_source_path(cfg: dict) -> str:
     return path
 
 
-def _render_workdir(cfg: dict) -> str:
-    """重建 /tmp/zigtester-cfdev：拷 worker → 写 wrangler.toml + .dev.vars。返回 workdir。"""
-    worker_type = cfg["worker_type"]
-    _subdir, _filename, dev_key = WORKER_SOURCE[worker_type]
-    src = _worker_source_path(cfg)
+def _render_workdir(worker: dict, cfg: dict) -> str:
+    """为单个 worker 重建 workdir（/tmp/zigtester-cfdev-<key>）：拷 worker → 写
+    wrangler.toml + .dev.vars。返回 workdir 路径。"""
+    workdir = f"{WORKDIR_BASE}-{worker['key']}"
+    src = _worker_source_path(worker, cfg)
 
-    if os.path.isdir(WORKDIR):
-        shutil.rmtree(WORKDIR)
-    os.makedirs(os.path.join(WORKDIR, "src"), exist_ok=True)
+    if os.path.isdir(workdir):
+        shutil.rmtree(workdir)
+    os.makedirs(os.path.join(workdir, "src"), exist_ok=True)
 
     # 拷贝 worker 到 src/index.js（wrangler.toml main 指向它）
-    shutil.copy2(src, os.path.join(WORKDIR, "src", "index.js"))
+    shutil.copy2(src, os.path.join(workdir, "src", "index.js"))
 
-    # wrangler.toml：本地 Workers 项目，绑定 127.0.0.1 + 指定端口/协议
+    # wrangler.toml：本地 Workers 项目，绑定 127.0.0.1 + 指定端口/协议。
+    # compatibility_date / compatibility_flags 按 worker 声明（Trojan 的 js-sha256 需
+    # nodejs_compat + date >= 2024-09-23 才能解析裸 require("crypto")/require("buffer")）。
+    port = cfg[worker["port_key"]]
+    date = worker["compatibility_date"]
+    flags = worker.get("compatibility_flags", [])
+    flags_line = ""
+    if flags:
+        flags_list = ", ".join(f'"{f}"' for f in flags)
+        flags_line = f"compatibility_flags = [{flags_list}]\n"
     wrangler_toml = (
-        "name = \"local-cf-dev\"\n"
+        f"name = \"local-cf-dev-{worker['key']}\"\n"
         "main = \"src/index.js\"\n"
-        "compatibility_date = \"2024-01-01\"\n"
+        f"compatibility_date = \"{date}\"\n"
+        f"{flags_line}"
         "\n"
         "[dev]\n"
-        f"port = {cfg['workers_port']}\n"
+        f"port = {port}\n"
         "ip = \"127.0.0.1\"\n"
         f"local_protocol = \"{cfg['local_protocol']}\"\n"
     )
-    with open(os.path.join(WORKDIR, "wrangler.toml"), "w", encoding="utf-8") as f:
+    with open(os.path.join(workdir, "wrangler.toml"), "w", encoding="utf-8") as f:
         f.write(wrangler_toml)
 
     # .dev.vars：worker 经 env.<key> 读（vless=uuid / trojan=pswd）
-    secret = cfg["uuid"] if worker_type == "vless" else cfg["trojan_password"]
-    with open(os.path.join(WORKDIR, ".dev.vars"), "w", encoding="utf-8") as f:
-        f.write(f"{dev_key} = \"{secret}\"\n")
+    secret = cfg[worker["secret_key"]]
+    with open(os.path.join(workdir, ".dev.vars"), "w", encoding="utf-8") as f:
+        f.write(f"{worker['dev_key']} = \"{secret}\"\n")
 
-    return WORKDIR
+    return workdir
 
 
 # ── 进程生命周期 ─────────────────────────────────────────────────
@@ -193,15 +226,36 @@ def _resolve_npx() -> tuple[str, dict[str, str]]:
     return npx, env
 
 
+def _wait_port_ready(port: int, timeout: float) -> bool:
+    """阻塞等待本机 TCP 端口就绪（worker 内自检用，与 zigtester ready_on 解耦）。
+
+    双 worker 常驻下，zigtester ready_on 只探 vless 端口；trojan worker 是否起来由
+    本控制器自行把关——任一 worker 端口未就绪即退出（非零），让 ready_on 探测失败。
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            s = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+            s.close()
+            return True
+        except OSError:
+            time.sleep(0.5)
+    return False
+
+
 class WranglerDev:
-    """封装 `npx wrangler dev` 子进程（start_new_session，便于杀整棵进程树）。"""
+    """封装多个 `npx wrangler dev` 子进程（每 worker 一个，start_new_session 便于杀整棵树）。"""
 
     def __init__(self) -> None:
-        self._proc: subprocess.Popen | None = None
+        self._procs: list[subprocess.Popen] = []
 
     def start(self, workdir: str, cfg: dict) -> bool:
+        """启动一个 wrangler dev 子进程（追加到 _procs）。失败返回 False。"""
         npx, env = _resolve_npx()
-        cmd = [npx, "wrangler", "dev"]
+        # --inspector-port 0：禁用 devtools 调试器端口。双 worker 常驻 = 两个 wrangler dev
+        # 并发，默认都抢 9229（workerd inspector 端口）→ 后起者 "Address already in use"。
+        # 本地 E2E 不需要调试器，禁掉避免端口冲突（否则两个 worker 无法同时运行）。
+        cmd = [npx, "wrangler", "dev", "--inspector-port", "0"]
         if cfg["local_protocol"] == "https":
             cert = _resolve_path(cfg["https_cert_path"])
             key = _resolve_path(cfg["https_key_path"])
@@ -215,7 +269,7 @@ class WranglerDev:
                 )
         logger.info("[cfdev] starting wrangler dev: workdir=%s cmd=%s", workdir, cmd)
         try:
-            self._proc = subprocess.Popen(
+            proc = subprocess.Popen(
                 cmd,
                 cwd=workdir,
                 stdout=subprocess.PIPE,
@@ -229,32 +283,64 @@ class WranglerDev:
         except Exception as e:
             logger.error("[cfdev] wrangler dev start failed: %s", e)
             return False
+        # 排空 stdout/stderr 到日志文件：不排空会管道满阻塞 wrangler（预存隐患），
+        # 同时保留 workerd console.log 供 E2E 失败取证（worker 侧错误只能在这看到）。
+        # 二进制模式：Popen 未开 text=True，stdout/stderr 是 bytes 流，直接写 wb。
+        log_path = f"{workdir}.log"
+        logf = open(log_path, "wb")
+
+        def _drain(stream) -> None:
+            for line in stream:
+                logf.write(line)
+                logf.flush()
+
+        threading.Thread(target=_drain, args=(proc.stdout,), daemon=True).start()
+        threading.Thread(target=_drain, args=(proc.stderr,), daemon=True).start()
+        proc._log_file = logf  # type: ignore[attr-defined]
+        proc._log_path = log_path  # type: ignore[attr-defined]
+        self._procs.append(proc)
         return True
 
     def is_running(self) -> bool:
-        return self._proc is not None and self._proc.poll() is None
+        return any(p is not None and p.poll() is None for p in self._procs)
 
     def stop(self) -> None:
-        """终止 wrangler 及 workerd 子进程（进程组 SIGTERM → SIGKILL）。"""
-        if self._proc is None:
+        """终止全部 wrangler 及 workerd 子进程（各进程组 SIGTERM → SIGKILL）。"""
+        if not self._procs:
             return
-        logger.info("[cfdev] stopping wrangler dev...")
-        try:
-            os.killpg(os.getpgid(self._proc.pid), signal.SIGTERM)
+        logger.info("[cfdev] stopping %d wrangler dev...", len(self._procs))
+        for proc in self._procs:
+            if proc is None:
+                continue
             try:
-                self._proc.wait(timeout=10)
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except Exception:
+                pass
+        for proc in self._procs:
+            if proc is None:
+                continue
+            try:
+                proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                logger.warning("[cfdev] wrangler did not exit after SIGTERM, sending SIGKILL")
-                os.killpg(os.getpgid(self._proc.pid), signal.SIGKILL)
-                self._proc.wait(timeout=3)
-        except Exception as e:
-            logger.warning("[cfdev] wrangler stop error: %s", e)
-        self._proc = None
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    proc.wait(timeout=3)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            log_file = getattr(proc, "_log_file", None)
+            if log_file is not None:
+                try:
+                    log_file.close()
+                except Exception:
+                    pass
+        self._procs = []
         logger.info("[cfdev] wrangler dev stopped")
 
 
 def _serve(args: argparse.Namespace) -> int:
-    """serve 模式：渲染 + 启动 wrangler dev + 阻塞等待停止信号。"""
+    """serve 模式：渲染全部 worker + 启动各 wrangler dev + 阻塞等待停止信号。"""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [cfdev] %(levelname)s %(message)s",
@@ -263,14 +349,26 @@ def _serve(args: argparse.Namespace) -> int:
 
     try:
         cfg = load_config()
-        workdir = _render_workdir(cfg)
+        workdirs = [_render_workdir(w, cfg) for w in WORKERS]
     except Exception as e:
         logger.error("[cfdev] render failed: %s", e)
         return 1
 
     ctl = WranglerDev()
-    if not ctl.start(workdir, cfg):
-        return 1
+    for w, workdir in zip(WORKERS, workdirs):
+        if not ctl.start(workdir, cfg):
+            ctl.stop()
+            return 1
+
+    # 双 worker 内自检：任一端口未就绪即退出（非零），让 zigtester ready_on 探测失败
+    # （否则 trojan worker 启动失败时 vless 端口仍可连，插件会"假就绪"）。
+    for w in WORKERS:
+        port = cfg[w["port_key"]]
+        if not _wait_port_ready(port, timeout=30):
+            logger.error("[cfdev] worker %s 端口 %d 未就绪，退出", w["key"], port)
+            ctl.stop()
+            return 1
+    logger.info("[cfdev] 全部 worker 就绪: %s", {w["key"]: cfg[w["port_key"]] for w in WORKERS})
 
     # 阻塞等待停止信号
     stop_event = False
@@ -291,14 +389,15 @@ def _serve(args: argparse.Namespace) -> int:
     finally:
         ctl.stop()
         # 清理渲染产物（避免污染 /tmp，防误提交）
-        if os.path.isdir(workdir):
-            shutil.rmtree(workdir, ignore_errors=True)
+        for workdir in workdirs:
+            if os.path.isdir(workdir):
+                shutil.rmtree(workdir, ignore_errors=True)
 
     return 0
 
 
 def _render(args: argparse.Namespace) -> int:
-    """render 模式：仅渲染 workdir 到 /tmp，不启动。供调试 / host 侧预渲染。"""
+    """render 模式：仅渲染全部 workdir 到 /tmp，不启动。供调试 / host 侧预渲染。"""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [cfdev] %(levelname)s %(message)s",
@@ -306,8 +405,8 @@ def _render(args: argparse.Namespace) -> int:
     )
     try:
         cfg = load_config()
-        workdir = _render_workdir(cfg)
-        logger.info("[cfdev] rendered workdir: %s", workdir)
+        workdirs = [_render_workdir(w, cfg) for w in WORKERS]
+        logger.info("[cfdev] rendered workdirs: %s", workdirs)
         return 0
     except Exception as e:
         logger.error("[cfdev] render failed: %s", e)
