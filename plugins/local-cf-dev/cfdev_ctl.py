@@ -157,6 +157,42 @@ def _render_workdir(cfg: dict) -> str:
 # ── 进程生命周期 ─────────────────────────────────────────────────
 
 
+def _resolve_npx() -> tuple[str, dict[str, str]]:
+    """定位 npx 命令 + 带 node bin 目录的 env。
+
+    zigtester MCP server 以极简 PATH（/usr/bin:/bin）启动，`npx`/`node`（经 n 版本
+    管理器装在 ~/.n/bin）不在其中 → 直接 `subprocess.Popen(["npx", ...])` 抛
+    FileNotFoundError。此处先 `shutil.which` 探测，再兜底常见 node 安装目录，找到后
+    把 node bin 目录前置注入 PATH（npx 是 `#!/usr/bin/env node` 脚本，必须能在 PATH
+    里找到 node）。
+
+    返回 (npx 命令路径, 注入 PATH 的 env)。找不到 node 时返回 ("npx", 原 env)，
+    由 Popen 的 FileNotFoundError 保持原有报错语义。
+    """
+    node = shutil.which("node")
+    node_dir = os.path.dirname(node) if node else None
+    if node_dir is None:
+        for cand in (
+            "~/.n/bin",
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+            "/usr/local/opt/node/bin",
+            "/opt/homebrew/opt/node/bin",
+        ):
+            d = os.path.expanduser(cand)
+            if os.path.isfile(os.path.join(d, "node")):
+                node_dir = d
+                break
+    if node_dir is None:
+        return "npx", dict(os.environ)
+    npx = shutil.which("npx")
+    if npx is None:
+        npx = os.path.join(node_dir, "npx")
+    env = dict(os.environ)
+    env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
+    return npx, env
+
+
 class WranglerDev:
     """封装 `npx wrangler dev` 子进程（start_new_session，便于杀整棵进程树）。"""
 
@@ -164,7 +200,8 @@ class WranglerDev:
         self._proc: subprocess.Popen | None = None
 
     def start(self, workdir: str, cfg: dict) -> bool:
-        cmd = ["npx", "wrangler", "dev"]
+        npx, env = _resolve_npx()
+        cmd = [npx, "wrangler", "dev"]
         if cfg["local_protocol"] == "https":
             cert = _resolve_path(cfg["https_cert_path"])
             key = _resolve_path(cfg["https_key_path"])
@@ -184,9 +221,10 @@ class WranglerDev:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 start_new_session=True,
+                env=env,
             )
         except FileNotFoundError:
-            logger.error("[cfdev] npx not found. Install Node.js 18+ first")
+            logger.error("[cfdev] npx/node not found. Install Node.js 18+ first")
             return False
         except Exception as e:
             logger.error("[cfdev] wrangler dev start failed: %s", e)
