@@ -231,3 +231,20 @@ async 工具 + `asyncio.to_thread` + 每 10s `report_progress` 心跳（progress
   vendor 第三套 `s5http_wkpgs/`（Socks5/HTTP over WS）**不接入**——socks5/http 入站测试已由
   sing-box 插件原生覆盖，本地 CF 无需重复。二者分工：sing-box 测原生 socks5/http，
   local-cf-dev 专测 CF 特有的 VLESS/Trojan-over-WS 生产形态。
+
+- **接入结论（2026-08-28 调研 zigoutbounds）**：VLESS/Trojan-over-WS 在 zigoutbounds **已完整实现，缺的是测试用例而非协议**。
+  - `src/transport/ws.zig`（2245 行，WS 握手+帧编解码+WsStream+WsLayer）+ `compose.zig` `Framing.ws` 已存在；
+  - `vless.zig:1287` / `trojan.zig:267` 已有 `if (params.ws_enabled) .{ .ws = .{ .path, .host } }`，经 `StreamFactory` 统一建连；
+  - 配置映射 `vless.zig:2062`（`vc.transport.?.type == .ws`）+ 单测 `vless.zig:2002` 已通；
+  - 与 `vless-grpc`/`trojan-grpc` 同构（协议 + framing 正交），但 `zigtester.yaml` 未挂 ws 变体 E2E。
+  - **接入前的真实风险**：CF worker 线格式 ≠ 标准 vless+ws。CF 形态 = VLESS 头+数据**单帧** + 响应流开头
+    **2 字节 cloudflare 响应头 `[version,0]`**（`cfdev_vless_ws_client.py:134-137` 剥离）；标准形态无此头。
+    故接入 local-cf-dev 前须先实测 zigoutbounds vless+ws ↔ CF worker 是否直通，不通再定位是响应头还是帧粒度差异。
+  - **27.1 标准形态已落地（2026-08-28）**：4 处接线（`test_engine.zig` proto_name 加 vless-ws/trojan-ws→vless/trojan；
+    `test_engine.py` PROTOCOLS + build_config_json 加 ws 分支，`transport: {type: ws, path: /vless-ws|/trojan-ws}`；
+    `zigtester.yaml` 加 functional×2 + bench-tcp/stream/sweep×6）。**注意：非"零代码"，是照 grpc 模式的纯接线**。
+    验证：functional `test-engine-vless-ws`（vless→xray :16905）/`test-engine-trojan-ws`（trojan→sing-box :16806）
+    PASS；bench-tcp 基线 `vless-ws` 13088 req/s p99 1.6ms / `trojan-ws` 9747 req/s p99 2.9ms，failed=0。
+    关键发现：vless/trojan 默认 `tls.enabled=true`（zigunicfg），ws 传输无需显式 tls 字段；ws JSON key = `path`。
+  - **27.2 CF 形态（后续）**：单独用 local-cf-dev 测 CF 兼容性（early data + 2 字节响应头），
+    先实测 zigoutbounds vless-ws ↔ CF worker 直通性，必要时在 vless 协议加 CF 兼容开关（非新协议）。
