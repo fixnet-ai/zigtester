@@ -19,6 +19,9 @@ config:
   trojan_port: 9443
   hysteria2_port: 10443
   vmess_port: 16800
+  vmess_tls_port: 16820
+  vmess_ws_port: 16821
+  vmess_ws_tls_port: 16822
   vless_port: 16801
   hysteria2_alt_port: 16802
   tuic_port: 16803
@@ -59,6 +62,9 @@ ports:
   - 9443      # trojan
   - 10443     # hysteria2
   - 16800     # vmess
+  - 16820     # vmess+tls
+  - 16821     # vmess+ws
+  - 16822     # vmess+ws+tls
   - 16801     # vless
   - 16802     # hysteria2 alt
   - 16803     # tuic

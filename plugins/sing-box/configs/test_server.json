@@ -139,6 +139,63 @@
       ]
     },
     {
+      "type": "vmess",
+      "tag": "vmess-tls-in",
+      "listen": "::",
+      "listen_port": __VMESS_TLS_PORT__,
+      "users": [
+        {
+          "name": "test-user",
+          "uuid": "__VMESS_UUID__",
+          "alterId": 0
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "certs/localhost.crt",
+        "key_path": "certs/localhost.key"
+      }
+    },
+    {
+      "type": "vmess",
+      "tag": "vmess-ws-in",
+      "listen": "::",
+      "listen_port": __VMESS_WS_PORT__,
+      "users": [
+        {
+          "name": "test-user",
+          "uuid": "__VMESS_UUID__",
+          "alterId": 0
+        }
+      ],
+      "transport": {
+        "type": "ws",
+        "path": "/vmess-ws"
+      }
+    },
+    {
+      "type": "vmess",
+      "tag": "vmess-ws-tls-in",
+      "listen": "::",
+      "listen_port": __VMESS_WS_TLS_PORT__,
+      "users": [
+        {
+          "name": "test-user",
+          "uuid": "__VMESS_UUID__",
+          "alterId": 0
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "certs/localhost.crt",
+        "key_path": "certs/localhost.key"
+      },
+      "transport": {
+        "type": "ws",
+        "path": "/vmess-ws-tls"
+      }
+    },
+    {
       "type": "vless",
       "tag": "vless-in",
       "listen": "::",

@@ -11,6 +11,9 @@ config:
   ss_port: 8488
   trojan_port: 9543
   vmess_port: 16900
+  vmess_tcp_port: 16920
+  vmess_tls_port: 16921
+  vmess_ws_tls_port: 16922
   vless_tls_port: 16901
   vless_ws_port: 16905
   vless_flow_port: 16908
@@ -40,6 +43,9 @@ ports:
   - 8488      # shadowsocks
   - 9543      # trojan
   - 16900     # vmess
+  - 16920     # vmess 裸 TCP
+  - 16921     # vmess+tls
+  - 16922     # vmess+ws+tls
   - 16901     # vless+tls
   - 16905     # vless+ws
   - 16906     # vless+reality

@@ -69,6 +69,75 @@
       }
     },
     {
+      "tag": "vmess-tcp-in",
+      "listen": "127.0.0.1",
+      "port": __VMESS_TCP_PORT__,
+      "protocol": "vmess",
+      "settings": {
+        "clients": [
+          {
+            "id": "__VMESS_UUID__",
+            "alterId": 0
+          }
+        ]
+      }
+    },
+    {
+      "tag": "vmess-tls-in",
+      "listen": "127.0.0.1",
+      "port": __VMESS_TLS_PORT__,
+      "protocol": "vmess",
+      "settings": {
+        "clients": [
+          {
+            "id": "__VMESS_UUID__",
+            "alterId": 0
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "certs/localhost.crt",
+              "keyFile": "certs/localhost.key"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tag": "vmess-ws-tls-in",
+      "listen": "127.0.0.1",
+      "port": __VMESS_WS_TLS_PORT__,
+      "protocol": "vmess",
+      "settings": {
+        "clients": [
+          {
+            "id": "__VMESS_UUID__",
+            "alterId": 0
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "tls",
+        "wsSettings": {
+          "path": "/vmess-ws-tls"
+        },
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "certs/localhost.crt",
+              "keyFile": "certs/localhost.key"
+            }
+          ]
+        }
+      }
+    },
+    {
       "tag": "vless-tls-in",
       "listen": "127.0.0.1",
       "port": __VLESS_TLS_PORT__,
