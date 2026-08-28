@@ -46,16 +46,17 @@
   延迟亚毫秒噪声 guard → `_is_short_duration`/`_is_stale`/`_is_latency_metric`；test_report_history
   27→32 全绿。详见 progress.md 近期定论。
 
-## ⚠️ 遗留：bench-standard-outbound socks/socks-xray 连接泄漏（交 zigoutbounds）
+## ✅ 已结案：bench-standard-outbound socks/socks-xray 连接泄漏（2026-08-25 修复）
 
-> 处置进展（08-25，详见 zigbox task_plan #89 + zigoutbounds findings §52）：
+> 处置进展（08-25，根因/修复见 zigoutbounds commit `481ed07`）：
 > - **EOF 语义定案**：重量出站 30s 挂起 = HTTP 客户端等 EOF 而 sing-box 不转发上游 FIN →
 >   CL 语义（`test_bench.read_by_cl` 默认开）后全部重量出站 PASS ✅
 > - **ss-xray 剔除（用户裁定）**：zigbox SS 客户端 ↔ xray 2022-blake3 握手不兼容，剔除非修复 ✅
 > - **redirect 平台守卫已落地**：`bench_outbound_cells()` 非 Linux 不枚举（macOS 为平台不支持）✅
-> - **剩余（确定性复现 ×2）**：socks/socks-xray fd 耗尽（24593 `accept failed: ProcessFdQuotaExceeded`，
->   679 成功请求 ×3 fd ≈ 2048 不释放）→ zigbox socks 出站连接泄漏，**已移交 zigoutbounds 跟踪**。
->   套件修复前持续 FAIL，勿改 zigtester 侧掩盖。完整诊断见 findings §10。
+> - **socks/socks-xray fd 耗尽 ✅ 已修复（zo `481ed07`）**：根因 = zo `socks5.zig` `workerMain`
+>   内联 `sess.drive()` 从不调 `pollSessions()`（唯一回收器）→ closed session 永驻 map，
+>   srv fd + tun fd 每请求泄漏 2-3 个 → ~679 请求后 fd 耗尽。修复 = 改 `pollSessions()`。
+>   验证：`bench-standard-outbound PASS peak_fd=16`（修复前 fd-exhausted）。完整诊断见 findings §10。
 
 ## 当前状态（2026-08-28）
 

@@ -339,6 +339,186 @@
           ]
         }
       }
+    },
+    {
+      "tag": "vless-xhttp-in",
+      "listen": "127.0.0.1",
+      "port": __VLESS_XHTTP_PORT__,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "__VLESS_UUID__",
+            "flow": ""
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "tls",
+        "xhttpSettings": {
+          "path": "/vless-xhttp/",
+          "mode": "stream-one"
+        },
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "certs/localhost.crt",
+              "keyFile": "certs/localhost.key"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tag": "trojan-xhttp-in",
+      "listen": "127.0.0.1",
+      "port": __TROJAN_XHTTP_PORT__,
+      "protocol": "trojan",
+      "settings": {
+        "clients": [
+          {
+            "password": "__TROJAN_PASSWORD__"
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "tls",
+        "xhttpSettings": {
+          "path": "/trojan-xhttp/",
+          "mode": "stream-one"
+        },
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "certs/localhost.crt",
+              "keyFile": "certs/localhost.key"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tag": "vless-xhttp-packetup-in",
+      "listen": "127.0.0.1",
+      "port": __VLESS_XHTTP_PACKETUP_PORT__,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "__VLESS_UUID__",
+            "flow": ""
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "tls",
+        "xhttpSettings": {
+          "path": "/vless-xhttp-packetup/",
+          "mode": "packet-up"
+        },
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "certs/localhost.crt",
+              "keyFile": "certs/localhost.key"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tag": "vless-xhttp-streamup-in",
+      "listen": "127.0.0.1",
+      "port": __VLESS_XHTTP_STREAMUP_PORT__,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "__VLESS_UUID__",
+            "flow": ""
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "tls",
+        "xhttpSettings": {
+          "path": "/vless-xhttp-streamup/",
+          "mode": "stream-up"
+        },
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "certs/localhost.crt",
+              "keyFile": "certs/localhost.key"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tag": "trojan-xhttp-packetup-in",
+      "listen": "127.0.0.1",
+      "port": __TROJAN_XHTTP_PACKETUP_PORT__,
+      "protocol": "trojan",
+      "settings": {
+        "clients": [
+          {
+            "password": "__TROJAN_PASSWORD__"
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "tls",
+        "xhttpSettings": {
+          "path": "/trojan-xhttp-packetup/",
+          "mode": "packet-up"
+        },
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "certs/localhost.crt",
+              "keyFile": "certs/localhost.key"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tag": "trojan-xhttp-streamup-in",
+      "listen": "127.0.0.1",
+      "port": __TROJAN_XHTTP_STREAMUP_PORT__,
+      "protocol": "trojan",
+      "settings": {
+        "clients": [
+          {
+            "password": "__TROJAN_PASSWORD__"
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "tls",
+        "xhttpSettings": {
+          "path": "/trojan-xhttp-streamup/",
+          "mode": "stream-up"
+        },
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "certs/localhost.crt",
+              "keyFile": "certs/localhost.key"
+            }
+          ]
+        }
+      }
     }
   ],
 
