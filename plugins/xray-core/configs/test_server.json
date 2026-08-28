@@ -519,6 +519,42 @@
           ]
         }
       }
+    },
+    {
+      "tag": "vless-xhttp-reality-in",
+      "listen": "127.0.0.1",
+      "port": __VLESS_XHTTP_REALITY_PORT__,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "__VLESS_UUID__",
+            "flow": ""
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "reality",
+        "xhttpSettings": {
+          "path": "/vless-xhttp-reality/",
+          "mode": "stream-one"
+        },
+        "realitySettings": {
+          "dest": "127.0.0.1:18444",
+          "xver": 0,
+          "serverNames": [
+            "localhost",
+            "127.0.0.1"
+          ],
+          "privateKey": "__REALITY_PRIVATE_KEY__",
+          "shortIds": [
+            "__REALITY_SHORT_ID__",
+            ""
+          ]
+        }
+      }
     }
   ],
 

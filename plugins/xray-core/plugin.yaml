@@ -27,6 +27,7 @@ config:
   vless_xhttp_streamup_port: 16927
   trojan_xhttp_packetup_port: 16928
   trojan_xhttp_streamup_port: 16929
+  vless_xhttp_reality_port: 16930
 
   # 凭证（每个插件独立生成/使用，与 sing-box 完全无关）
   vless_uuid: "e8b9a5b8-7c8a-4a87-b3f1-2e5d4a7c9b1a"
@@ -66,6 +67,7 @@ ports:
   - 16927     # vless+xhttp (stream-up)
   - 16928     # trojan+xhttp (packet-up)
   - 16929     # trojan+xhttp (stream-up)
+  - 16930     # vless+xhttp+reality
 
 build:
   # xray 二进制必须已安装（macOS: brew install xray 或下载官方 release）

@@ -295,7 +295,9 @@ class MetricExtractor:
                 else:
                     result.update(parsed)
             return result
-        # 单档：re.search 对全 stdout 取首匹配（bench-tcp 行在 bench-udp 前 = TCP 数据）
+        # 单档：re.search 对全 stdout 取首匹配（bench-tcp 行在 bench-udp 前 = TCP 数据）。
+        # ⚠️ 依赖 test_engine.py 打印顺序（tcp 先于 udp）——若重排打印顺序会静默把
+        # UDP 数据记为 TCP，污染 history/阈值回归（2026-08-28 review 警示）。
         result.update(_bench_from_text(stdout))
         return result
 
