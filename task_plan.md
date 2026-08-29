@@ -131,6 +131,22 @@ zigbox vless+ws 客户端 → 127.0.0.1:18787（workerd）→ worker 解析 VLES
 - 消费方接入（剩余）：zigbox/zigoutbounds `zigtester.yaml` 加 `plugins: [local-cf-dev]` + 相应套件；
   plugin_ports.py 已增 `cfdev_*` 派生函数（`cfdev_workers_port()` 等 5 个）。
 
+## 开放待办（2026-08-30 起，zt-6）
+
+### zt-6：long 套件后 zigbox 残留未清理 → 环境自愈假失败（修复待评估）
+
+> **来源**：2026-08-30 zigbox 全协议性能重测发现（zigbox findings「全协议性能重测与 zigtester 环境自愈 bug」段，commit b042651）。该 bug 属 zigtester 项目，由本项目跟踪。
+
+**现象**：每次 long 套件（bench-long-*，62-120s）结束后，被测 zigbox 进程在 zigtester 生命周期结束后**仍残留并 listen 12080 端口** → 下一个套件执行前环境 self-heal 检测到端口冲突 → **SIGTERM local-echo**（exit=-15）→ local-echo 恢复不完整（partial recovery）→ 后续套件**假失败**。
+
+**实际影响（08-30 实测）**：bench-long-socks4 FAIL ×2（1677-2595 req/s、err=40、cpu_tail=0、fd_growth 19-21），一度误判为代码回归并做了 revert A/B（早前 PASS 为环境恢复巧合）；干净环境重测 PASS。
+
+**修复方向**（待评估，勿在本次混入）：
+1. long 套件结束后清理被测进程（kill 残留 zigbox）——zigbox 是被测对象、非禁杀的 plugin process；
+2. 或 self-heal 检测到**被测进程残留**时先清理被测进程再判插件环境，避免误伤 local-echo 触发 partial recovery。
+
+**教训已入 zigbox findings**：FAIL 排查先查环境自愈残留 / SIGTERM / 端口占用，再归因代码；A/B 必须保证环境隔离。
+
 ## 历史完成阶段总表（Phase 1-12，全部完成）
 
 > 执行细节与决策推导见 git log + DESIGN.md + 代码头部注释（findings 二次瘦身后只留指针表）。
