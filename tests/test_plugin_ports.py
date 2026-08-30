@@ -6,7 +6,7 @@
      （config 段 + ports 列表）——真实 plugins/*/plugin.yaml。
   2. 命名访问器（echo_tcp_port/singbox_port/xray_port/...）从 config 段派生正确。
   3. sing-box test_server.json 模板经 singbox_ctl._render_config_to_path 渲染：
-     所有 __KEY__ 占位符可被 plugin.yaml 值填充，结果结构合法（18 个 inbound、
+     所有 __KEY__ 占位符可被 plugin.yaml 值填充，结果结构合法（22 个 inbound、
      端口/凭证与 plugin.yaml 一致）。
   4. xray-core test_server.json 模板的占位符全部可解析。
 
@@ -80,7 +80,7 @@ def test_singbox_template_renders_via_singbox_ctl():
 
         cfg = json.loads(_strip_jsonc(open(out, encoding="utf-8").read()))
         inbounds = cfg["inbounds"]
-        assert len(inbounds) == 18, f"预期 18 个 inbound，实际 {len(inbounds)}"
+        assert len(inbounds) == 22, f"预期 22 个 inbound，实际 {len(inbounds)}"
 
         by_tag = {ib["tag"]: ib for ib in inbounds}
         assert by_tag["mixed-in"]["listen_port"] == sb["mixed_port"]

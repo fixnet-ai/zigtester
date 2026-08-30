@@ -151,11 +151,12 @@ zigbox vless+ws 客户端 → 127.0.0.1:18787（workerd）→ worker 解析 VLES
   `bench-long-socks5` PASS（73.3s, 7021 req/s, p99 6.2ms, rss_growth 0.1MB, fd_growth -1，无回归）；
   两套件结束后 `lsof 12080` 均 FREE、无 zigbox 进程——**zt-6 假失败同类 long 套件闭环**。
 
-**遗留（zigbox 侧治本，待用户知情）**：根因 = `zigbox/tests/test_bench.py` L1769「不停止 zigbox，供后续测试
-复用」注释与实际行为矛盾（`_zigbox_ensure_running` 每次强制重启 + `_cleanup_leftover` 先 pkill，从未复用），
-main() 普通 bench 路径与 run_standard_inbound 从不 stop → 脚本退出后 zigbox 残留为孤儿。
-zigtester 兜底已消除其影响（测试统一经 zigtester）；手动直跑脚本仍会残留。治本（main 结束统一 stop）
-涉及 zigbox 测试脚本改动，是否做待用户裁定。
+**zigbox 侧治本（08-31 已落地，test_bench.py）**：根因 = main() 普通 bench 路径与 run_standard_inbound
+从不 stop zigbox（L1769「供后续测试复用」注释与 `_zigbox_ensure_running` 每次强制重启的实际行为矛盾）。
+修复 = `_zigbox_ensure_running` 返回 `ZigboxProcess` 对象（不再丢句柄）+ main() 外层 try/finally 统一
+`zb.stop()`（含 concurrency sweep 分支）+ run_standard_inbound try/finally `zb.stop()`。验证：
+bench-standard-inbound（run_standard_inbound 路径）PASS 740 req/s + bench-socks5（main 路径）PASS
+2796 req/s，两套件结束后 12080 FREE、无 zigbox 进程。zigtester 兜底保留（防第三方脚本残留）。
 
 **教训已入 zigbox findings**：FAIL 排查先查环境自愈残留 / SIGTERM / 端口占用，再归因代码；A/B 必须保证环境隔离。
 
