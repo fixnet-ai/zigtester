@@ -8,7 +8,8 @@ description: "CONNECT-IP (RFC 9643) echo 测试服务器（connect-ip-go 最小�
 config:
   masque_port: 13400       # CONNECT-IP QUIC 监听（UDP）
   ready_port: 13401        # TCP readiness 探针（UDP 端口无法 TCP 探测，独立探针）
-  assign_addr: "10.0.0.1/32"  # 分配给客户端的源 IP 前缀
+  assign_addr: "10.0.0.1/32"  # 分配给客户端的源 IPv4 前缀
+  assign_addr6: "2001:db8::1/128"  # 分配给客户端的源 IPv6 前缀（对齐 mihomo Ipv6）
   # 证书复用 local-echo（生态统一 localhost 证书，SAN 含 DNS:localhost + IP:127.0.0.1）
   https_cert_path: "../local-echo/certs/localhost.crt"
   https_key_path: "../local-echo/certs/localhost.key"
@@ -23,7 +24,7 @@ build:
 lifecycle:
   start:
     # 端口取自 config 段（zigtester 注入 PLUGIN_* 环境变量），${VAR:-默认} 兜底独立手动运行。
-    command: "exec ./masque-echo --host 127.0.0.1 --port ${PLUGIN_MASQUE_PORT:-13400} --ready-port ${PLUGIN_READY_PORT:-13401} --cert ../local-echo/certs/localhost.crt --key ../local-echo/certs/localhost.key"
+    command: "exec ./masque-echo --host 127.0.0.1 --port ${PLUGIN_MASQUE_PORT:-13400} --ready-port ${PLUGIN_READY_PORT:-13401} --cert ../local-echo/certs/localhost.crt --key ../local-echo/certs/localhost.key --assign ${PLUGIN_ASSIGN_ADDR:-10.0.0.1/32} --assign6 ${PLUGIN_ASSIGN_ADDR6:-2001:db8::1/128}"
     timeout: 10
     ready_on:
       type: tcp

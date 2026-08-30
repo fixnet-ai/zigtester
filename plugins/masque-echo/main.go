@@ -36,7 +36,8 @@ func main() {
 	readyPort := flag.Int("ready-port", 13401, "TCP readiness probe port")
 	certPath := flag.String("cert", "../local-echo/certs/localhost.crt", "TLS certificate")
 	keyPath := flag.String("key", "../local-echo/certs/localhost.key", "TLS key")
-	assignAddr := flag.String("assign", "10.0.0.1/32", "IP prefix assigned to the client (src addr)")
+	assignAddr := flag.String("assign", "10.0.0.1/32", "IPv4 prefix assigned to the client (src addr)")
+	assignAddr6 := flag.String("assign6", "2001:db8::1/128", "IPv6 prefix assigned to the client (src addr)")
 	flag.Parse()
 
 	// ---- TCP readiness 探针（accept 即关）----
@@ -59,6 +60,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("invalid assign addr %q: %v", *assignAddr, err)
 	}
+	assignPrefix6, err := netip.ParsePrefix(*assignAddr6)
+	if err != nil {
+		log.Fatalf("invalid assign6 addr %q: %v", *assignAddr6, err)
+	}
 
 	mux := h.NewServeMux()
 	mux.HandleFunc("/masque", func(w h.ResponseWriter, r *h.Request) {
@@ -77,8 +82,8 @@ func main() {
 			log.Printf("connect-ip proxy: %v", err)
 			return
 		}
-		// 分配客户端源地址前缀（客户端发 IP 包须用此作 src）
-		if err := conn.AssignAddresses(context.Background(), []netip.Prefix{assignPrefix}); err != nil {
+		// 分配客户端源地址前缀（客户端发 IP 包须用此作 src；v4+v6 双栈，对齐 mihomo Ipv6）
+		if err := conn.AssignAddresses(context.Background(), []netip.Prefix{assignPrefix, assignPrefix6}); err != nil {
 			log.Printf("assign addresses: %v", err)
 			_ = conn.Close()
 			return
