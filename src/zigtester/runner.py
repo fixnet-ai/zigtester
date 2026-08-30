@@ -526,6 +526,7 @@ def _load_plugin_envs() -> dict[str, str]:
             ("local-echo", "LOCALECHO"),
             ("sing-box", "SINGBOX"),
             ("xray-core", "XRAY"),
+            ("masque-echo", "MASQUEE"),
         ):
             cfg = _pp.load_plugin(name).get("config", {})
             for key, value in cfg.items():
