@@ -192,6 +192,13 @@ class TestExecutor:
             if suite.teardown is not None:
                 self._execute_teardown(suite.teardown, work_dir, result)
 
+            # ── Phase 6: 兜底清理 test command 进程树（zt-6）──
+            # 测试脚本可能未清理其 spawn 的后代（如 long 套件残留 zigbox 占用
+            # 12080 → 下一套件环境自愈假失败）。进程组清理覆盖脱离父进程的孤儿；
+            # 放 teardown 之后，不干扰套件自带的清理钩子。
+            if test_proc is not None:
+                self._kill_test_proc_tree(test_proc)
+
         elapsed = (time.time() - started) * 1000
         result.duration_ms = round(elapsed, 1)
         result.exit_code = exit_code
@@ -238,6 +245,10 @@ class TestExecutor:
             stderr=subprocess.PIPE,
             env=merged_env,
             cwd=work_dir,
+            # zt-6：独立进程组（组 id = 命令进程 pid）。test command 与其全部
+            # 后代同属一组 → 套件结束后 killpg 兜底清理残留（含脱离父进程的
+            # 孤儿被测进程，如 long 套件残留的 zigbox listen 12080）。
+            start_new_session=True,
         )
 
     def _start_hook_process(
@@ -294,6 +305,31 @@ class TestExecutor:
                 proc.kill()
                 proc.wait(timeout=2)
         except Exception:
+            pass
+
+    def _kill_test_proc_tree(self, proc: subprocess.Popen) -> None:
+        """清理 test command 进程组（含脱离父进程的孤儿后代）。
+
+        test command 启动时 start_new_session=True → 独立进程组，组 id = 命令
+        进程 pid。命令进程退出后其后代若未自行清理会残留为孤儿（ppid=1），
+        killpg 按组 id 覆盖整组，无需再追踪 ppid。仅清理本套件产生的进程组，
+        不影响插件进程（独立进程组）。SIGTERM → 2s → SIGKILL。
+        """
+        pgid = proc.pid
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            return
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            try:
+                os.killpg(pgid, 0)  # 探测进程组是否仍有成员
+            except ProcessLookupError:
+                return
+            time.sleep(0.1)
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
             pass
 
     def _wait_hook_ready(

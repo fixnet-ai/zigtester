@@ -133,7 +133,7 @@ zigbox vless+ws 客户端 → 127.0.0.1:18787（workerd）→ worker 解析 VLES
 
 ## 开放待办（2026-08-30 起，zt-6）
 
-### zt-6：long 套件后 zigbox 残留未清理 → 环境自愈假失败（修复待评估）
+### zt-6：long 套件后 zigbox 残留未清理 → 环境自愈假失败（2026-08-31 修复落地）
 
 > **来源**：2026-08-30 zigbox 全协议性能重测发现（zigbox findings「全协议性能重测与 zigtester 环境自愈 bug」段，commit b042651）。该 bug 属 zigtester 项目，由本项目跟踪。
 
@@ -141,9 +141,21 @@ zigbox vless+ws 客户端 → 127.0.0.1:18787（workerd）→ worker 解析 VLES
 
 **实际影响（08-30 实测）**：bench-long-socks4 FAIL ×2（1677-2595 req/s、err=40、cpu_tail=0、fd_growth 19-21），一度误判为代码回归并做了 revert A/B（早前 PASS 为环境恢复巧合）；干净环境重测 PASS。
 
-**修复方向**（待评估，勿在本次混入）：
-1. long 套件结束后清理被测进程（kill 残留 zigbox）——zigbox 是被测对象、非禁杀的 plugin process；
-2. 或 self-heal 检测到**被测进程残留**时先清理被测进程再判插件环境，避免误伤 local-echo 触发 partial recovery。
+**修复落地（2026-08-31，方案 1）**：runner.py 进程组兜底清理——
+- `_start_process` 给 test command 加 `start_new_session=True`（独立进程组，组 id = 命令进程 pid）；
+- `execute()` finally 末尾（teardown 之后）新增 `_kill_test_proc_tree(test_proc)`：SIGTERM → 2s → SIGKILL
+  覆盖整组。命令进程退出后残留后代变孤儿（ppid=1）仍属原进程组 → killpg 按组 id 兜底，无需追踪 ppid；
+  插件进程独立进程组不受影响（不误伤 local-echo）。
+- **单测**：`tests/test_runner_cleanup.py` 2 用例（spawn 孤儿被清理 + 普通命令无副作用），2 passed。
+- **集成验证**：重启服务（launchctl kickstart）后经 zigtester 跑 `bench-socks5` PASS（2825 req/s）+
+  `bench-long-socks5` PASS（73.3s, 7021 req/s, p99 6.2ms, rss_growth 0.1MB, fd_growth -1，无回归）；
+  两套件结束后 `lsof 12080` 均 FREE、无 zigbox 进程——**zt-6 假失败同类 long 套件闭环**。
+
+**遗留（zigbox 侧治本，待用户知情）**：根因 = `zigbox/tests/test_bench.py` L1769「不停止 zigbox，供后续测试
+复用」注释与实际行为矛盾（`_zigbox_ensure_running` 每次强制重启 + `_cleanup_leftover` 先 pkill，从未复用），
+main() 普通 bench 路径与 run_standard_inbound 从不 stop → 脚本退出后 zigbox 残留为孤儿。
+zigtester 兜底已消除其影响（测试统一经 zigtester）；手动直跑脚本仍会残留。治本（main 结束统一 stop）
+涉及 zigbox 测试脚本改动，是否做待用户裁定。
 
 **教训已入 zigbox findings**：FAIL 排查先查环境自愈残留 / SIGTERM / 端口占用，再归因代码；A/B 必须保证环境隔离。
 
