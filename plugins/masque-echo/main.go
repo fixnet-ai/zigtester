@@ -83,18 +83,9 @@ func main() {
 			_ = conn.Close()
 			return
 		}
-		// 通告本端可达路由（全段，对齐 mihomo masque.go:138-154）。
-		// connect-ip-go 方向语义:本端 ReadPacket 校验 dst 用本端 localRoutes（本端 AdvertiseRoute 的），
-		// 对端发来的 ROUTE_ADVERTISEMENT 只更新 availableRoutes——服务器不 AdvertiseRoute 则
-		// 客户端发往任意 dst 的包被服务器拒收（实测 "datagram destination address not allowed"）。
-		if err := conn.AdvertiseRoute(context.Background(), []connectip.IPRoute{
-			{StartIP: netip.MustParseAddr("0.0.0.0"), EndIP: netip.MustParseAddr("255.255.255.255")},
-			{StartIP: netip.MustParseAddr("::"), EndIP: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
-		}); err != nil {
-			log.Printf("advertise route: %v", err)
-			_ = conn.Close()
-			return
-		}
+		// 对齐 Cloudflare WARP 服务器端：不 AdvertiseRoute（不通告路由）。
+		// 服务器仍收任意 dst 包（fork 的 AllowAnyDestination=true 跳过 dst 校验，真转发语义），
+		// 客户端无需等路由通告即可直接发包（WARP 形态）。
 		// IP 包原样回显（echo 语义）
 		go func() {
 			for {
