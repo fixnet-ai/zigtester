@@ -234,7 +234,12 @@ class TestExecutor:
     ) -> subprocess.Popen:
         """启动子进程。"""
         if sudo:
-            cmd = ["sudo"] + cmd
+            # ⚠ sudo 默认 env_reset 清空调用者环境变量——套件依赖的 host 化变量
+            # （ZIGBOX_ECHO_HOST/ZIGTESTER_PLUGIN_HOST 经 merged_env 传入）会被
+            # 清空 → ECHO_HOST 回退 127.0.0.1 探测本机端口失败（tun-scenarios
+            # macvm 实证，1.6s exit=1）。加 -E 保留调用者环境；PATH 仍受
+            # sudoers secure_path 约束（与裸 sudo 一致，无 PATH 回归）。
+            cmd = ["sudo", "-E"] + cmd
 
         merged_env = dict(os.environ)
         merged_env.update(env)
@@ -314,7 +319,25 @@ class TestExecutor:
         进程 pid。命令进程退出后其后代若未自行清理会残留为孤儿（ppid=1），
         killpg 按组 id 覆盖整组，无需再追踪 ppid。仅清理本套件产生的进程组，
         不影响插件进程（独立进程组）。SIGTERM → 2s → SIGKILL。
+        Windows 无进程组/killpg：改用 taskkill /T 递归终止进程树（zt-7）。
         """
+        if os.name == "nt":
+            # Windows 无 killpg：taskkill /T /F 递归终止整棵进程树。
+            # os.kill(pid, 0) 在 Windows 是 TerminateProcess 直接杀进程（非
+            # 存活探测），故存活判断用 proc.wait()/proc.poll()，绝不用 os.kill。
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()  # TerminateProcess 兜底
+            except Exception:
+                pass
+            return
         pgid = proc.pid
         try:
             os.killpg(pgid, signal.SIGTERM)
@@ -328,7 +351,7 @@ class TestExecutor:
                 return
             time.sleep(0.1)
         try:
-            os.killpg(pgid, signal.SIGKILL)
+            os.killpg(pgid, getattr(signal, "SIGKILL", 9))
         except (ProcessLookupError, PermissionError):
             pass
 
