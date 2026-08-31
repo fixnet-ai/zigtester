@@ -684,6 +684,19 @@ class Reporter:
                         for rl in relevant:
                             lines.append(f"    {rl}")
                         lines.append("    ```")
+                # stdout 尾部透传（#211 失败取证）：test 脚本详细输出含失败
+                # 场景行 + zigbox 日志摘要，此前被吞掉导致失败无法定位
+                # （如 macvm VT17 timed out 仅见 message 一行）。失败行通常在
+                # 脚本尾部（fail-fast 中止前），截最后 20 行非空行，单行截断
+                # 防超长（长 JSON 转储/日志行）。
+                if s.stdout.strip():
+                    stdout_tail = [l for l in s.stdout.strip().splitlines() if l.strip()][-20:]
+                    if stdout_tail:
+                        lines.append(f"  - stdout 尾部:")
+                        lines.append("    ```")
+                        for sl in stdout_tail:
+                            lines.append(f"    {sl[:200]}")
+                        lines.append("    ```")
 
         # 回归检测（regressions=None 表示未启用对比，不渲染；
         # 空 dict = 已分析且无退化，渲染 ✓；有内容 → 逐套件红字）
