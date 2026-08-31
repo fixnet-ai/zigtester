@@ -19,6 +19,7 @@
 // 用法:
 //   ./local-echo [--tcp-port 13333] [--dns-port 5533] [--upstream-dns 8.8.8.8]
 //                [--h2-port 13335] [--h3-port 13336] [--cert ...] [--key ...]
+//   核心端口 tcp/dns/h2/h3 支持 0=off（单端口实例：只起额外 http/tls 等端口）。
 
 package main
 
@@ -687,12 +688,19 @@ func main() {
 			go handleTcp(conn)
 		}
 	}
-	tcpLn, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *host, *tcpPort))
-	if err != nil {
-		log.Fatalf("tcp listen: %v", err)
+	// 端口 0=off（单端口实例场景，如 host 侧特权 http:80）：core 端口
+	// tcp/dns/h2/h3 原本无条件监听（无 0=off），多实例并启时与主实例端口
+	// 冲突 → log.Fatalf 整进程退出（2026-08-31 macvm TUN 实跑实证：
+	// `--http-port 80` 仍绑 13333 → bind address already in use → http:80
+	// 从未监听）。统一条件化：0 则跳过对应监听（UDP/DNS 跟随 tcp/dns 端口）。
+	if *tcpPort > 0 {
+		tcpLn, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *host, *tcpPort))
+		if err != nil {
+			log.Fatalf("tcp listen: %v", err)
+		}
+		go serveTcpEcho(tcpLn, "tcp")
+		fmt.Printf("TCP_ECHO=%s:%d\n", *host, *tcpPort)
 	}
-	go serveTcpEcho(tcpLn, "tcp")
-	fmt.Printf("TCP_ECHO=%s:%d\n", *host, *tcpPort)
 
 	// ---- 额外 HTTP 回显端口(同协议自适应;zigbox 矩阵 NOTUN curl 目标)----
 	if *httpPort > 0 {
@@ -775,21 +783,25 @@ func main() {
 		fmt.Printf("STREAM_ECHO=%s:%d\n", *host, *streamPort)
 	}
 
-	// ---- UDP echo(原样回传)----
-	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(*host), Port: *tcpPort})
-	if err != nil {
-		log.Fatalf("udp echo listen: %v", err)
+	// ---- UDP echo(原样回传;跟随 tcp-port，0=off)----
+	if *tcpPort > 0 {
+		udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(*host), Port: *tcpPort})
+		if err != nil {
+			log.Fatalf("udp echo listen: %v", err)
+		}
+		go handleUdp(udpConn)
+		fmt.Printf("UDP_ECHO=%s:%d\n", *host, *tcpPort)
 	}
-	go handleUdp(udpConn)
-	fmt.Printf("UDP_ECHO=%s:%d\n", *host, *tcpPort)
 
-	// ---- DNS echo(选择性代理;FakeIP 模式)----
-	dnsConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(*host), Port: *dnsPort})
-	if err != nil {
-		log.Fatalf("dns listen: %v", err)
+	// ---- DNS echo(选择性代理;FakeIP 模式;0=off)----
+	if *dnsPort > 0 {
+		dnsConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(*host), Port: *dnsPort})
+		if err != nil {
+			log.Fatalf("dns listen: %v", err)
+		}
+		go handleDns(dnsConn, *upstreamDns, false, *realDnsAnswerIP)
+		fmt.Printf("DNS_ECHO=%s:%d\n", *host, *dnsPort)
 	}
-	go handleDns(dnsConn, *upstreamDns, false, *realDnsAnswerIP)
-	fmt.Printf("DNS_ECHO=%s:%d\n", *host, *dnsPort)
 
 	// ---- 二级 DNS(real-map 模式:测试域名 → 127.0.0.1/::1;zigbox 矩阵)----
 	if *realDnsPort > 0 {
@@ -801,42 +813,47 @@ func main() {
 		fmt.Printf("REAL_DNS_ECHO=%s:%d\n", *host, *realDnsPort)
 	}
 
-	// ---- H2 echo ----
-	h2Ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *host, *h2Port))
-	if err != nil {
-		log.Fatalf("h2 listen: %v", err)
-	}
 	handler := http.HandlerFunc(echoHandler)
-	h2Server := &http.Server{Handler: handler}
-	go func() {
-		if err := h2Server.ServeTLS(h2Ln, *certPath, *keyPath); err != nil && err != http.ErrServerClosed {
-			log.Printf("h2 server: %v", err)
-			os.Exit(1)
-		}
-	}()
-	fmt.Printf("H2_ECHO=%s:%d\n", *host, *h2Port)
 
-	// ---- H3 echo ----
-	cert, err := tls.LoadX509KeyPair(*certPath, *keyPath)
-	if err != nil {
-		log.Fatalf("load cert: %v", err)
-	}
-	h3Conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(*host), Port: *h3Port})
-	if err != nil {
-		log.Fatalf("h3 udp listen: %v", err)
-	}
-	h3Server := &http3.Server{
-		Handler:    handler,
-		TLSConfig:  &tls.Config{Certificates: []tls.Certificate{cert}},
-		QUICConfig: &quic.Config{MaxIdleTimeout: 30 * time.Second},
-	}
-	go func() {
-		if err := h3Server.Serve(h3Conn); err != nil {
-			log.Printf("h3 server: %v", err)
-			os.Exit(1)
+	// ---- H2 echo（0=off）----
+	if *h2Port > 0 {
+		h2Ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *host, *h2Port))
+		if err != nil {
+			log.Fatalf("h2 listen: %v", err)
 		}
-	}()
-	fmt.Printf("H3_ECHO=%s:%d\n", *host, *h3Port)
+		h2Server := &http.Server{Handler: handler}
+		go func() {
+			if err := h2Server.ServeTLS(h2Ln, *certPath, *keyPath); err != nil && err != http.ErrServerClosed {
+				log.Printf("h2 server: %v", err)
+				os.Exit(1)
+			}
+		}()
+		fmt.Printf("H2_ECHO=%s:%d\n", *host, *h2Port)
+	}
+
+	// ---- H3 echo（0=off）----
+	if *h3Port > 0 {
+		cert, err := tls.LoadX509KeyPair(*certPath, *keyPath)
+		if err != nil {
+			log.Fatalf("load cert: %v", err)
+		}
+		h3Conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(*host), Port: *h3Port})
+		if err != nil {
+			log.Fatalf("h3 udp listen: %v", err)
+		}
+		h3Server := &http3.Server{
+			Handler:    handler,
+			TLSConfig:  &tls.Config{Certificates: []tls.Certificate{cert}},
+			QUICConfig: &quic.Config{MaxIdleTimeout: 30 * time.Second},
+		}
+		go func() {
+			if err := h3Server.Serve(h3Conn); err != nil {
+				log.Printf("h3 server: %v", err)
+				os.Exit(1)
+			}
+		}()
+		fmt.Printf("H3_ECHO=%s:%d\n", *host, *h3Port)
+	}
 
 	fmt.Println("RESULT=READY")
 	select {} // 常驻
