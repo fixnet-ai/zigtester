@@ -791,6 +791,15 @@ func main() {
 		}
 		go handleUdp(udpConn)
 		fmt.Printf("UDP_ECHO=%s:%d\n", *host, *tcpPort)
+
+		// ---- UDP6 echo([::1] 仅回环;纯 IPv6 UDP 目标 VT-IP6-4 用,同端口)----
+		// 与 udp4 同端口号（OS 按地址族区分），handleUdp 泛型(ReadFromUDP/WriteToUDP)。
+		udp6Conn, err := net.ListenUDP("udp6", &net.UDPAddr{IP: net.IPv6loopback, Port: *tcpPort})
+		if err != nil {
+			log.Fatalf("udp6 echo listen: %v", err)
+		}
+		go handleUdp(udp6Conn)
+		fmt.Printf("UDP6_ECHO=[::1]:%d\n", *tcpPort)
 	}
 
 	// ---- DNS echo(选择性代理;FakeIP 模式;0=off)----
