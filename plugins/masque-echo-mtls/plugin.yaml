@@ -1,0 +1,41 @@
+name: masque-echo-mtls
+description: "CONNECT-IP (RFC 9643) echo 测试服务器 mTLS 变体（复用 masque-echo 源码）：UDP :13410 建 QUIC+H3 CONNECT-IP 隧道，要求并校验客户端证书（--client-ca certs/client.crt，RequireAndVerifyClientCert）；TCP :13411 readiness 探针。W4 masque-warp-pin 套件 mTLS 正/反场景专用"
+
+# 端口真相源：独立于 masque-echo（13400/13401），本插件独占 13410/13411 避免
+# 与 masque-echo 端口冲突预检互扰。其余配置语义与 masque-echo 完全一致。
+config:
+  host: "127.0.0.1"        # 监听/模板 host（CONNECT-IP :authority 严格匹配，必须 = 客户端连接 host）
+  masque_port: 13410       # CONNECT-IP QUIC 监听（UDP）
+  ready_port: 13411        # TCP readiness 探针
+  assign_addr: "10.0.0.1/32"  # 分配给客户端的源 IPv4 前缀
+  assign_addr6: "2001:db8::1/128"  # 分配给客户端的源 IPv6 前缀（对齐 mihomo Ipv6）
+  # 服务器证书复用 local-echo（与 masque-echo 相同，保证 pin 正向用同一 SPKI）
+  https_cert_path: "../local-echo/certs/localhost.crt"
+  https_key_path: "../local-echo/certs/localhost.key"
+  # mTLS 客户端 CA 锚：空 DN 自签客户端证书（与 zigbox GenerateCert 语义一致，
+  # 公钥 = zigbox private-key 对应公钥 → Go 校验自洽链通过）。certs/client.crt 由
+  # zigoutbounds/tests/tools/masque-echo/gen_certs.sh 生成（一对密钥，勿单独换）。
+  client_ca: "certs/client.crt"
+
+# 监听端口列表 — 用于 zigtester 端口冲突预检 + 每套件前环境自检（端口归属校验）
+ports:
+  - 13410     # CONNECT-IP QUIC（UDP）
+  - 13411     # readiness 探针（TCP）
+
+build:
+  # 共享 masque-echo 源码（connectip fork 在 masque-echo/connectip），输出独立二进制
+  work_dir: "../masque-echo"
+  command: "go build -o ../masque-echo-mtls/masque-echo-mtls ."
+lifecycle:
+  start:
+    # 端口取自 config 段（zigtester 注入 PLUGIN_* 环境变量），${VAR:-默认} 兜底独立手动运行。
+    command: "exec ./masque-echo-mtls --host ${PLUGIN_HOST:-127.0.0.1} --port ${PLUGIN_MASQUE_PORT:-13410} --ready-port ${PLUGIN_READY_PORT:-13411} --cert ../local-echo/certs/localhost.crt --key ../local-echo/certs/localhost.key --assign ${PLUGIN_ASSIGN_ADDR:-10.0.0.1/32} --assign6 ${PLUGIN_ASSIGN_ADDR6:-2001:db8::1/128} --client-ca ${PLUGIN_CLIENT_CA:-certs/client.crt}"
+    timeout: 10
+    ready_on:
+      type: tcp
+      port: 13411
+      host: "127.0.0.1"
+  stop:
+    timeout: 5
+    kill:
+      - "masque-echo-mtls"

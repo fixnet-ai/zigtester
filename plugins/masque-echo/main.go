@@ -11,17 +11,22 @@
 // 用法:
 //   ./masque-echo [--host 127.0.0.1] [--port 13400] [--ready-port 13401]
 //                 [--cert ../local-echo/certs/localhost.crt] [--key ...] [--assign 10.0.0.1/32]
+//                 [--client-ca client.crt]   # 非空 = 要求并校验客户端证书(mTLS)
 
 package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"net/netip"
+	"os"
 
 	connectip "github.com/metacubex/connect-ip-go"
 	h "github.com/metacubex/http"
@@ -38,6 +43,7 @@ func main() {
 	keyPath := flag.String("key", "../local-echo/certs/localhost.key", "TLS key")
 	assignAddr := flag.String("assign", "10.0.0.1/32", "IPv4 prefix assigned to the client (src addr)")
 	assignAddr6 := flag.String("assign6", "2001:db8::1/128", "IPv6 prefix assigned to the client (src addr)")
+	clientCA := flag.String("client-ca", "", "PEM client CA cert(s); non-empty requires & verifies client cert (mTLS)")
 	flag.Parse()
 
 	// ---- TCP readiness 探针（accept 即关）----
@@ -127,7 +133,7 @@ func main() {
 	}
 	h3Server := &http3.Server{
 		Handler:         mux,
-		TLSConfig:       &tls.Config{Certificates: []tls.Certificate{cert}},
+		TLSConfig:       buildServerTLS(cert, *clientCA),
 		EnableDatagrams: true,
 	}
 	go func() {
@@ -139,4 +145,63 @@ func main() {
 	fmt.Printf("MASQUE_ECHO=%s:%d ready=%s:%d assign=%s\n", *host, *port, *host, *readyPort, assignPrefix.String())
 	fmt.Println("RESULT=READY")
 	select {} // 常驻
+}
+
+// buildServerTLS 构造服务器 TLS 配置。
+//
+// clientCAPath 非空时要求并校验客户端证书（mTLS）。校验语义**对齐 Cloudflare WARP
+// / usque**（api/masque.go InsecureSkipVerify + VerifyPeerCertificate），而非 Go 标准
+// 链校验（RequireAndVerifyClientCert）：
+//   - WARP/usque 客户端发**运行时自签**的空 DN 证书（GenerateCert，issuer==subject==空），
+//     Go 标准 RequireAndVerifyClientCert 无法把它验证为"由 CA 锚签发"（自签 leaf 直接
+//     按根处理 → unknown authority，W4 实测 openssl error 18 / Go unknown authority）。
+//   - 所以服务器侧要求证书但**跳过链校验**，改为 VerifyPeerCertificate **比对客户端证书
+//     ECDSA 公钥与锚（client.crt）公钥**——zigbox 用配置 private-key 生成证书时公钥
+//     与 client.crt 一致（同密钥对），公钥匹配即放行（对齐 usque 服务端公钥比对）。
+//
+// clientCAPath 为空时保持原行为（不要求客户端证书）。
+func buildServerTLS(cert tls.Certificate, clientCAPath string) *tls.Config {
+	cfg := &tls.Config{Certificates: []tls.Certificate{cert}}
+	if clientCAPath == "" {
+		return cfg
+	}
+	pemData, err := os.ReadFile(clientCAPath)
+	if err != nil {
+		log.Fatalf("read client-ca: %v", err)
+	}
+	block, _ := pem.Decode(pemData)
+	if block == nil {
+		log.Fatalf("client-ca %s: no PEM blocks", clientCAPath)
+	}
+	anchorCert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		log.Fatalf("client-ca %s: parse: %v", clientCAPath, err)
+	}
+	anchorKey, ok := anchorCert.PublicKey.(*ecdsa.PublicKey)
+	if !ok {
+		log.Fatalf("client-ca %s: anchor public key not ECDSA", clientCAPath)
+	}
+	// RequireAnyClientCert：TLS 1.3 发 CertificateRequest；客户端无证书时拒绝
+	// （mtls-neg）。InsecureSkipVerify=true 跳过默认链校验；VerifyPeerCertificate
+	// 比对客户端证书公钥与锚公钥（对齐 WARP/usque 公钥固定语义）。
+	cfg.ClientAuth = tls.RequireAnyClientCert
+	cfg.InsecureSkipVerify = true
+	cfg.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+		if len(rawCerts) == 0 {
+			return errors.New("no client certificate")
+		}
+		leaf, err := x509.ParseCertificate(rawCerts[0])
+		if err != nil {
+			return fmt.Errorf("parse client cert: %v", err)
+		}
+		peerKey, ok := leaf.PublicKey.(*ecdsa.PublicKey)
+		if !ok {
+			return fmt.Errorf("client cert public key not ECDSA")
+		}
+		if !peerKey.Equal(anchorKey) {
+			return errors.New("client cert public key mismatch with --client-ca anchor")
+		}
+		return nil
+	}
+	return cfg
 }
