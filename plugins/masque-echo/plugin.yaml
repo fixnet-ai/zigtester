@@ -6,6 +6,11 @@ description: "CONNECT-IP (RFC 9643) echo 测试服务器（connect-ip-go 最小�
 # lifecycle.start.command 用 ${PLUGIN_<KEY>:-<默认>} 引用本段(zigtester 注入
 # PLUGIN_* 环境变量),保证运行命令与 config 段永不失步。
 config:
+  host: "127.0.0.1"        # 监听/模板 host（CONNECT-IP :authority 严格匹配，必须 = 客户端连接 host）。
+                           # 默认回环 = 同机测试（vtun/masque 套件）；host 化场景（VM 经网关 IP 连 host
+                           # 插件）须设 PLUGIN_HOST=<网关 IP> 覆盖（不能像 local-echo 绑 0.0.0.0——模板
+                           # host 会变 0.0.0.0，:authority 仍不匹配 → 400）。见 zigbox
+                           # tests/tools/masque_echo_host.sh 固化启停。
   masque_port: 13400       # CONNECT-IP QUIC 监听（UDP）
   ready_port: 13401        # TCP readiness 探针（UDP 端口无法 TCP 探测，独立探针）
   assign_addr: "10.0.0.1/32"  # 分配给客户端的源 IPv4 前缀
@@ -24,7 +29,7 @@ build:
 lifecycle:
   start:
     # 端口取自 config 段（zigtester 注入 PLUGIN_* 环境变量），${VAR:-默认} 兜底独立手动运行。
-    command: "exec ./masque-echo --host 127.0.0.1 --port ${PLUGIN_MASQUE_PORT:-13400} --ready-port ${PLUGIN_READY_PORT:-13401} --cert ../local-echo/certs/localhost.crt --key ../local-echo/certs/localhost.key --assign ${PLUGIN_ASSIGN_ADDR:-10.0.0.1/32} --assign6 ${PLUGIN_ASSIGN_ADDR6:-2001:db8::1/128}"
+    command: "exec ./masque-echo --host ${PLUGIN_HOST:-127.0.0.1} --port ${PLUGIN_MASQUE_PORT:-13400} --ready-port ${PLUGIN_READY_PORT:-13401} --cert ../local-echo/certs/localhost.crt --key ../local-echo/certs/localhost.key --assign ${PLUGIN_ASSIGN_ADDR:-10.0.0.1/32} --assign6 ${PLUGIN_ASSIGN_ADDR6:-2001:db8::1/128}"
     timeout: 10
     ready_on:
       type: tcp
