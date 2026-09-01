@@ -91,8 +91,8 @@ func main() {
 		// 对齐 Cloudflare WARP 服务器端：不 AdvertiseRoute（不通告路由）。
 		// 服务器仍收任意 dst 包（fork 的 AllowAnyDestination=true 跳过 dst 校验，真转发语义），
 		// 客户端无需等路由通告即可直接发包（WARP 形态）。
-		// IP 包原样回显（echo 语义）；IPv4+TCP 段叠加无状态反射
-		// （P2 no-tun TCP 数据面，见 tcp_echo.go）。UDP/ICMP 保持纯 echo。
+		// IPv4+TCP/UDP 段做无状态反射（src/dst 翻转，P2 TCP + 32.5g 真 TUN UDP
+		// 数据面，见 tcp_echo.go）；ICMP/IPv6 原样回显（echo 语义）。
 		// 隧道重置注入（P5）：收到 UDP magic 载荷 → 关 CONNECT-IP 流（FIN）
 		// 驱动客户端重连（见 tcp_echo.go isResetTrigger）。注意只关流、不关
 		// QUIC 连接——客户端复用同 QUIC 连接重开 CONNECT-IP 流即可。

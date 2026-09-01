@@ -1,14 +1,15 @@
-// tcp_echo.go — stateless TCP reflector for the CONNECT-IP echo server.
+// tcp_echo.go — stateless TCP/UDP reflector for the CONNECT-IP echo server.
 //
-// 纯 IP 回显无法完成 TCP 握手（回显 SYN 得到的是 SYN 而非 SYN-ACK）。
-// 本文件在 echo 语义之上叠加一个无状态 TCP 反射器（P2 no-tun TCP 数据面）：
-//   解析 IPv4+TCP 头，src/dst IP 与端口对调，seq/ack 按接收段推算回射，
-//   payload 原样回显，重算 IP 与 TCP（伪头）校验和。
+// 纯 IP 回显无法完成 TCP 握手（回显 SYN 得到的是 SYN 而非 SYN-ACK），且真 TUN
+// 场景 UDP 原样回显会因 dst 非本机被内核重路由回 TUN 循环。故对 IPv4+TCP/UDP
+// 做无状态反射（src/dst IP 与端口对调，payload 原样回显，重算校验和）：
+//   TCP（P2 no-tun TCP 数据面）：
 //   - SYN      -> SYN-ACK（固定服务端 ISN；ack = seq+1）
 //   - 数据/ACK -> ACK(PSH) + 回显 payload（ack = seq+len+SYN+FIN）
 //   - FIN      -> FIN-ACK（ack = seq+len+SYN+FIN）
 //   - RST      -> 原样回显（连接已中止，无状态反射无意义）
-//   - 其余     -> 原样回显（UDP/ICMP/IPv6 保持纯 echo 语义）
+//   UDP（32.5g 真 TUN 数据面）：src/dst IP + sport/dport 翻转，重算 IP/UDP 校验和
+//   ICMP/IPv6：原样回显（保持 echo 语义）
 //
 // 设计约束：
 //   - 无状态：不维护连接表，仅凭当前段推算响应（服务端 seq = 收到的 ack，
@@ -54,7 +55,7 @@ func isResetTrigger(pkt []byte) bool {
 // serverISN — 无状态反射的固定服务端初始序列号。
 const serverISN uint32 = 0x22001100
 
-// reflectIPv4TCP 对收到的 IP 包做 TCP 反射；非 IPv4+TCP 返回原包（echo 语义）。
+// reflectIPv4TCP 对收到的 IPv4 包做反射；非反射协议（ICMP/IPv6）返回原包（echo 语义）。
 // 返回的切片可能是原包（无副本）也可能是新分配的反射包，调用方按 WritePacket
 // 语义原样发送即可（composeDatagram 会再次递减 TTL 并重算 IP 校验和）。
 func reflectIPv4TCP(pkt []byte) []byte {
@@ -66,13 +67,24 @@ func reflectIPv4TCP(pkt []byte) []byte {
 	if ihl < 20 || len(pkt) < ihl {
 		return pkt
 	}
-	if pkt[9] != 6 { // 非 TCP（UDP/ICMP）→ 原样回显
-		return pkt
-	}
 	totalLen := int(binary.BigEndian.Uint16(pkt[2:4]))
 	if len(pkt) < totalLen || totalLen < ihl {
 		return pkt
 	}
+	switch pkt[9] {
+	case 6:
+		return reflectTCP(pkt, ihl, totalLen)
+	case 17:
+		return reflectUDP(pkt, ihl, totalLen)
+	default:
+		return pkt // ICMP/IPv6 → 原样回显
+	}
+}
+
+// reflectTCP 无状态 TCP 反射（P2 no-tun TCP 数据面，原 reflectIPv4TCP 主体）。
+// src/dst IP 与端口对调，seq/ack 按接收段推算回射，payload 原样回显，
+// 重算 IP 与 TCP（伪头）校验和。RST 原样回显（连接已中止，无状态反射无意义）。
+func reflectTCP(pkt []byte, ihl, totalLen int) []byte {
 	tcp := pkt[ihl:totalLen]
 	if len(tcp) < 20 {
 		return pkt
@@ -138,6 +150,34 @@ func reflectIPv4TCP(pkt []byte) []byte {
 	return resp
 }
 
+// reflectUDP UDP 反射（32.5g 真 TUN 数据面）：翻转 src/dst IP + sport/dport，
+// payload 原样，重算 IP 与 UDP（伪头）校验和。反射后回显包 dst = 客户端源地址
+// （macvm 本机 10.0.0.1），写回 TUN 后内核按本机地址投递给应用 socket；
+// 原样回显 dst=远端非本机会被内核重路由回 TUN 造成循环。
+func reflectUDP(pkt []byte, ihl, totalLen int) []byte {
+	udp := pkt[ihl:totalLen]
+	if len(udp) < 8 {
+		return pkt
+	}
+	// 拷贝整包，翻转 src/dst IP + sport/dport，重算 IP 与 UDP 校验和
+	resp := make([]byte, totalLen)
+	copy(resp, pkt[:totalLen])
+	srcIP := pkt[12:16]
+	dstIP := pkt[16:20]
+	copy(resp[12:16], dstIP)
+	copy(resp[16:20], srcIP)
+	ru := resp[ihl:totalLen]
+	binary.BigEndian.PutUint16(ru[0:2], binary.BigEndian.Uint16(udp[2:4])) // sport = 原 dport
+	binary.BigEndian.PutUint16(ru[2:4], binary.BigEndian.Uint16(udp[0:2])) // dport = 原 sport
+	ru[6] = 0
+	ru[7] = 0 // 清零 UDP 校验和再重算（伪头用翻转后的 src/dst）
+	binary.BigEndian.PutUint16(ru[6:8], udpChecksum(dstIP, srcIP, ru))
+	resp[10] = 0
+	resp[11] = 0 // 清零 IP 校验和再重算
+	binary.BigEndian.PutUint16(resp[10:12], ipChecksum(resp[:ihl]))
+	return resp
+}
+
 // tcpChecksum 计算带 IPv4 伪头的 TCP 校验和（checksum 字段须已清零）。
 func tcpChecksum(srcIP, dstIP, seg []byte) uint16 {
 	var sum uint32
@@ -169,4 +209,30 @@ func ipChecksum(header []byte) uint16 {
 		sum = (sum & 0xFFFF) + (sum >> 16)
 	}
 	return ^uint16(sum)
+}
+
+// udpChecksum 计算带 IPv4 伪头的 UDP 校验和（checksum 字段须已清零）。
+// RFC 768：计算结果为全 0 时按规范传 0xFFFF（接收端 0x0000 表示未计算）。
+func udpChecksum(srcIP, dstIP, seg []byte) uint16 {
+	var sum uint32
+	sum += uint32(binary.BigEndian.Uint16(srcIP[0:2]))
+	sum += uint32(binary.BigEndian.Uint16(srcIP[2:4]))
+	sum += uint32(binary.BigEndian.Uint16(dstIP[0:2]))
+	sum += uint32(binary.BigEndian.Uint16(dstIP[2:4]))
+	sum += 17               // protocol = UDP
+	sum += uint32(len(seg)) // UDP length（头 + payload）
+	for i := 0; i+1 < len(seg); i += 2 {
+		sum += uint32(binary.BigEndian.Uint16(seg[i : i+2]))
+	}
+	if len(seg)%2 == 1 {
+		sum += uint32(seg[len(seg)-1]) << 8
+	}
+	for sum>>16 != 0 {
+		sum = (sum & 0xFFFF) + (sum >> 16)
+	}
+	c := ^uint16(sum)
+	if c == 0 {
+		return 0xFFFF
+	}
+	return c
 }
