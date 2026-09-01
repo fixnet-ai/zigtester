@@ -43,3 +43,6 @@ plugins/local-echo/local-echo
 # 插件运行时渲染产物（singbox_ctl/xray_ctl render 输出）
 *.rendered.json
 plugins/masque-echo/masque-echo
+
+# Go plugin build artifacts (W4 masque-echo-mtls binary)
+plugins/masque-echo-mtls/masque-echo-mtls
