@@ -160,6 +160,16 @@ bench-standard-inbound（run_standard_inbound 路径）PASS 740 req/s + bench-so
 
 **教训已入 zigbox findings**：FAIL 排查先查环境自愈残留 / SIGTERM / 端口占用，再归因代码；A/B 必须保证环境隔离。
 
+### zt-9：launchd ProcessType Background → Interactive（zigoutbounds unit 编译被杀 806M，09-01 收尾）
+
+> **来源**：zigoutbounds unit 持续 FAIL exit=1（08-29 起历史 10 连），详见 zigbox task_plan.md「跨项目统一待办」zigoutbounds B-① 附带发现 + zigbox task_plan zt-9 行。
+
+**现象**：`zigtester_run zigoutbounds --level unit` stderr `1m MaxRSS:806M`~`923M` = zigoutbounds-tests **编译**被杀（pool_tests 35M 正常）。**对照实验（非代码 bug）**：本地直跑 `zig build test` 437/437 + 20s + 编译 MaxRSS:1G 正常完成——编译主测试二进制本就需 ~1GB 峰值；zigtester MCP 服务以 launchd `ProcessType: Background`（autostart.py:93 硬编码）运行，该进程及子进程继承 Background **jetsam 内存配额 + 降调度**（同源 `1m` vs `17s`），编译至 ~900M 即被杀（系统内存 48% free、rlimit 无限、无 jetsam 压力记录）。
+
+**修复（09-01）**：`autostart.py` `ProcessType: Background` → `Interactive`（MCP 是交互式测试入口，Background 类型不匹配）+ 注释说明根因 + `zigtester install --dir fixnet` 重装（launchd kickstart 重启 MCP 服务）。
+
+**验证**：`zigtester_run zigoutbounds --level unit` **435/435 PASS ×2**（11s/16s，此前 1m + exit=1）。**教训**：MCP/测试服务进程类型必须匹配其工作负载（派生大编译），Background 隐含内存/调度上限。
+
 ## 历史完成阶段总表（Phase 1-12，全部完成）
 
 > 执行细节与决策推导见 git log + DESIGN.md + 代码头部注释（findings 二次瘦身后只留指针表）。

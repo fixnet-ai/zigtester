@@ -90,7 +90,12 @@ def _plist_content(working_dir: str) -> bytes:
         "WorkingDirectory": working_dir,
         "RunAtLoad": True,
         "KeepAlive": True,
-        "ProcessType": "Background",
+        # Interactive（勿改回 Background）：MCP 是交互式测试入口，测试常派生 ~1GB
+        # 编译（zigoutbounds unit 主测试二进制，本地直跑 MaxRSS:1G / 20s 正常完成）。
+        # Background 类型对该进程及子进程施加 jetsam 内存配额 + 降调度，实测把该
+        # 编译杀在 ~900M（1m 后 MaxRSS:806M~923M，pool_tests 35M 却正常）——非代码
+        # bug，属 launchd 进程类型配额。见 zigbox task_plan.md zt-9。
+        "ProcessType": "Interactive",
         "StandardOutPath": str(_log_path()),
         "StandardErrorPath": str(_log_path()),
     }
