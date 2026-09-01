@@ -93,10 +93,18 @@ func main() {
 		// 客户端无需等路由通告即可直接发包（WARP 形态）。
 		// IP 包原样回显（echo 语义）；IPv4+TCP 段叠加无状态反射
 		// （P2 no-tun TCP 数据面，见 tcp_echo.go）。UDP/ICMP 保持纯 echo。
+		// 隧道重置注入（P5）：收到 UDP magic 载荷 → 关 CONNECT-IP 流（FIN）
+		// 驱动客户端重连（见 tcp_echo.go isResetTrigger）。注意只关流、不关
+		// QUIC 连接——客户端复用同 QUIC 连接重开 CONNECT-IP 流即可。
 		go func() {
 			for {
 				pkt, err := conn.ReadPacket()
 				if err != nil {
+					_ = conn.Close()
+					return
+				}
+				if isResetTrigger(pkt) {
+					log.Printf("reset trigger: closing CONNECT-IP stream")
 					_ = conn.Close()
 					return
 				}

@@ -149,3 +149,61 @@ func TestReflectRSTEcho(t *testing.T) {
 		t.Fatalf("expected same slice for RST echo")
 	}
 }
+
+// buildClientUDPPkt 构造客户端 IPv4+UDP 包（src=10.0.0.1 → dst=10.0.0.2）。
+// 对齐 masque.zig buildIpv4Udp 线格式（20B IP 头 + 8B UDP 头 + payload）。
+func buildClientUDPPkt(t *testing.T, payload []byte) []byte {
+	t.Helper()
+	total := 20 + 8 + len(payload)
+	pkt := make([]byte, total)
+	pkt[0] = 0x45 // IPv4, IHL=5
+	binary.BigEndian.PutUint16(pkt[2:4], uint16(total))
+	pkt[8] = 64
+	pkt[9] = 17 // UDP
+	copy(pkt[12:16], []byte{10, 0, 0, 1})
+	copy(pkt[16:20], []byte{10, 0, 0, 2})
+	binary.BigEndian.PutUint16(pkt[20:22], 40000) // sport
+	binary.BigEndian.PutUint16(pkt[22:24], 13400) // dport = masque echo port
+	binary.BigEndian.PutUint16(pkt[24:26], uint16(8+len(payload)))
+	copy(pkt[28:], payload)
+	return pkt
+}
+
+func TestIsResetTrigger(t *testing.T) {
+	// 命中：UDP 载荷以 magic 前缀开头
+	pkt := buildClientUDPPkt(t, append(append([]byte{}, resetMagic...), []byte("rest")...))
+	if !isResetTrigger(pkt) {
+		t.Fatalf("expected reset trigger on magic UDP payload")
+	}
+	// 精确载荷命中
+	if !isResetTrigger(buildClientUDPPkt(t, resetMagic)) {
+		t.Fatalf("expected reset trigger on exact magic payload")
+	}
+	// 随机 echo 载荷（1024B）不命中
+	rand := make([]byte, 1024)
+	for i := range rand {
+		rand[i] = byte(i * 7)
+	}
+	if isResetTrigger(buildClientUDPPkt(t, rand)) {
+		t.Fatalf("unexpected reset trigger on random payload")
+	}
+	// 短载荷（不足 magic）不命中
+	if isResetTrigger(buildClientUDPPkt(t, resetMagic[:5])) {
+		t.Fatalf("unexpected reset trigger on short payload")
+	}
+	// TCP 包不命中（proto=6）
+	tcpPkt := buildClientPkt(t, 100, 0, 0x18, resetMagic)
+	if isResetTrigger(tcpPkt) {
+		t.Fatalf("unexpected reset trigger on TCP packet")
+	}
+	// 非 IPv4（IPv6 版本号 6）不命中
+	v6 := buildClientUDPPkt(t, resetMagic)
+	v6[0] = 0x60
+	if isResetTrigger(v6) {
+		t.Fatalf("unexpected reset trigger on IPv6 packet")
+	}
+	// 畸形短包（<28B）不命中
+	if isResetTrigger([]byte{0x45, 0x00, 0x00, 0x14}) {
+		t.Fatalf("unexpected reset trigger on malformed short packet")
+	}
+}

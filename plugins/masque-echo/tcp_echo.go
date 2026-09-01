@@ -19,8 +19,37 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 )
+
+// resetMagic — 隧道重置注入触发器（P5 no-tun 重连 E2E）。
+// 客户端经 UDP 数据面发一个载荷以此前缀开头的 IPv4+UDP 包 → 服务器检测到后
+// 关闭 CONNECT-IP 流（conn.Close() 发 FIN），驱动客户端 .ready 态读到 EOF →
+// 隧道 dead → 退避重连。载荷前缀 15 字节，与随机 echo payload（1024B 随机块）
+// 碰撞概率可忽略。
+var resetMagic = []byte("MASQUE-RESET\x00\x01")
+
+// isResetTrigger 判断 IPv4+UDP 包是否携带重置魔法载荷。
+// 返回 true 时调用方应关闭隧道（不再回显）。
+func isResetTrigger(pkt []byte) bool {
+	if len(pkt) < 28 || pkt[0]>>4 != 4 {
+		return false
+	}
+	ihl := int(pkt[0]&0x0F) * 4
+	if ihl < 20 || len(pkt) < ihl+8 {
+		return false
+	}
+	if pkt[9] != 17 { // 非 UDP（TCP/ICMP）→ 不触发
+		return false
+	}
+	totalLen := int(binary.BigEndian.Uint16(pkt[2:4]))
+	if len(pkt) < totalLen || totalLen < ihl+8 {
+		return false
+	}
+	payload := pkt[ihl+8 : totalLen]
+	return bytes.HasPrefix(payload, resetMagic)
+}
 
 // serverISN — 无状态反射的固定服务端初始序列号。
 const serverISN uint32 = 0x22001100
