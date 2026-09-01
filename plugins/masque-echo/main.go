@@ -91,7 +91,8 @@ func main() {
 		// 对齐 Cloudflare WARP 服务器端：不 AdvertiseRoute（不通告路由）。
 		// 服务器仍收任意 dst 包（fork 的 AllowAnyDestination=true 跳过 dst 校验，真转发语义），
 		// 客户端无需等路由通告即可直接发包（WARP 形态）。
-		// IP 包原样回显（echo 语义）
+		// IP 包原样回显（echo 语义）；IPv4+TCP 段叠加无状态反射
+		// （P2 no-tun TCP 数据面，见 tcp_echo.go）。UDP/ICMP 保持纯 echo。
 		go func() {
 			for {
 				pkt, err := conn.ReadPacket()
@@ -99,7 +100,8 @@ func main() {
 					_ = conn.Close()
 					return
 				}
-				if _, err := conn.WritePacket(pkt); err != nil {
+				out := reflectIPv4TCP(pkt)
+				if _, err := conn.WritePacket(out); err != nil {
 					_ = conn.Close()
 					return
 				}

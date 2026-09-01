@@ -70,12 +70,9 @@ E2E 数据路径：zigbox vless+ws → 127.0.0.1:18787(workerd) → worker 解�
 `connect({hostname:"localhost"})` → 127.0.0.1:13333(local-echo) → 回程。
 
 **开放待办（本文件唯一开放项，勿在本次混入）**：
-- **消费方接入**：zigbox/zigoutbounds `zigtester.yaml` 加 `plugins: [local-cf-dev]` + 相应 VLESS/Trojan+WS
-  套件（客户端目标地址须用**域名 `localhost`**，见 findings §11 C.4）。
-- 实测 `wrangler dev` 启动（端口 18787 就绪）已由三层验证覆盖；ECH 本地不可测，文档化于 README
-  （真连 CF 边缘测 ECH 属另一类场景，非本插件范围）。
-- 后续 27.2 CF 形态：测 CF 兼容性（early data + 2 字节响应头 `[version,0]`），先实测 zigoutbounds
-  vless-ws ↔ CF worker 直通性（zigoutbounds WS 实现已完整，缺测试用例）。
+
+> **✅ Phase 13 已收尾关闭（09-01，用户裁定）**：消费方接入 zigoutbounds ✅ 闭环（`zo zigtester.yaml:12` 插件声明 + L220-237 两套件，PASS 历史）；**zigbox 侧裁决「不接」**（纯编排层冗余，CF 兼容性独有价值全在协议层 zo；「CF 2 字节响应头 [version,0]」实为**标准 VLESS 服务器响应头** zo `vless.zig:1175` parseResponseLen，非 CF 专属 hack）；`wrangler dev` 启动 ✅ 闭环；**27.2 early data（WS 0-RTT）记文档化后续项**（客户端当前不发 early data、zo 侧未验证，非阻塞）。`local-cf-dev` 插件保留为 zo 专属插件。调研详情 + 依据见 zigbox `findings.md`「Phase 13 local-cf-dev 收尾调研」段。
+> **遗留（非阻塞后续项）**：27.2 CF 形态 early data 验证（客户端可选优化）；如未来补 zigbox ws 全链路，优先复用 sing-box/xray 对端（zo 已建 vless-ws→xray:16905 / trojan-ws→sing-box:16806），成本远低于 CF worker。
 
 ## 开放待办（历史，均已闭环）
 
