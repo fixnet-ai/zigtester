@@ -34,6 +34,7 @@
 | masque-echo CONNECT-IP echo 语义 + PLUGIN_HOST（CONNECT-IP :authority 严格匹配，host 化场景须覆盖） | `plugins/masque-echo/plugin.yaml` config 段 + `main.go` 头部 |
 | masque-echo stateless TCP 反射器（SYN/数据/FIN 无状态推算，仅 IPv4+TCP；UDP 32.5g 翻转 src/dst） | `plugins/masque-echo/tcp_echo.go` 头部 |
 | masque-echo-mtls mTLS 变体（复用 masque-echo 源码，client_ca 校验；独立端口 13410/13411） | `plugins/masque-echo-mtls/plugin.yaml` config 段 |
+| zig_test parser 构建失败误报修复（多 step 编译错误 → `build_failure`，不喂 detect_flaky，09-02 950e8a1） | `src/zigtester/metrics.py` `_parse_zig_test` |
 
 ## 测试方法（仍有效，非代码）
 

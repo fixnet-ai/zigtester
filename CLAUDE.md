@@ -142,7 +142,7 @@ ZIGTESTER_ROOT=~/works/2025/fixnet python -m zigtester.server &
 
 | 解析器 | 适用场景 | 行为 |
 |--------|---------|------|
-| `zig_test` | `zig build test` | 解析 `X/Y passed; Z skipped` 及 `X passed; Y skipped; Z failed.` |
+| `zig_test` | `zig build test` | 解析 `X/Y passed; Z skipped` 及 `X passed; Y skipped; Z failed.`；多 step 编译错误 → `build_failure`（不误报为断言失败，09-02 950e8a1） |
 | `line_count` | 任意命令 | exit 0 → PASS，输出行数作为指标 |
 | `test_protocols` | zigbox test_protocols.py | 解析 `总计 X \| 通过 Y \| 失败 Z` |
 | `bench` | zigbox test_bench.py | 解析吞吐/延迟分位/传输速率 |

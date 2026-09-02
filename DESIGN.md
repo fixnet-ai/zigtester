@@ -1,11 +1,12 @@
 # zigtester — 自动测试框架设计
 
-> **状态**：Phase 2 代码实现已完成（2026-08-07），核心框架可运行。
+> **状态**：Phase 1-12 + A/B/C/D 性能架构重构 + Phase 13（local-cf-dev）已全部完成（2026-09-01 Phase 13 收尾），核心框架可运行。
+> 本文件为架构唯一来源，已与实现同步（4 层级 + schema 含 performance-scenarios）。
 > **仓库**：`github.com/fixnet-ai/zigtester`（独立仓库，通过 pip/gh 安装分发）
 
 ## Context
 
-当前 6 个兄弟项目（zigfoundation、zigtun、zigproxy、zigdns、zigoutbounds、zigbox）各自拥有独立的测试体系，缺乏统一的测试配置格式、跨项目执行器、标准报告输出和历史回归检测。zigtester 目标是成为一个可被每个项目复用的 Python 自动测试框架，通过标准化配置文件自动扫描并执行单元测试、功能测试和性能测试（压力测试并入性能测试，作为其长时持续 + 资源趋势形态）。
+当前 8 个兄弟项目（zigfoundation、zigtun、zigproxy、zigdns、zigoutbounds、zigbox、zigroute、zigunicfg）各自拥有独立的测试体系，缺乏统一的测试配置格式、跨项目执行器、标准报告输出和历史回归检测。zigtester 目标是成为一个可被每个项目复用的 Python 自动测试框架，通过标准化配置文件自动扫描并执行单元测试、功能测试和性能测试（压力测试并入性能测试，作为其长时持续 + 资源趋势形态）。
 
 ## 设计原则
 
@@ -26,7 +27,7 @@
 | **测试输出** | 原始 stdout 全量进 context | 服务端解析，只返回结构化摘要 |
 | **zig build test 500行输出** | 500 行全进 | → `{passed:88, failed:0, skipped:1}` |
 | **压测 100 次原始数据** | 全部进 context | → 服务端计算分位数，只返回 p50/p99 |
-| **跨 6 项目 scan** | Claude 手动 ls/read 每个项目 | 一次 `zigtester_scan` 返回结构化列表 |
+| **跨 8 项目 scan** | Claude 手动 ls/read 每个项目 | 一次 `zigtester_scan` 返回结构化列表 |
 | **性能历史 30 条** | 全量文本 | → 只返回趋势 + 异常标记 |
 
 **结论**：测试框架是 MCP 的理想场景 — 大量原始数据在服务端处理，只有结构化摘要进入 Claude context。token 节省可达 10-50x。
@@ -130,8 +131,9 @@ levels:
         latency_p99_ms:
           max: 500
           
-  # 长时持续 + 资源趋势（原 stress 层并入性能层，压力=性能测试的长时形态）。
-  # 长时套件同样放在 performance 层下，加 per_suite_only: true 禁止混入全量：
+  # 第 4 层级 performance-scenarios: 压测/疲劳/长时持续（原 stress 形态，压力=性能测试的长时变体）
+  # 独立于此层，禁止混入 unit/functional/performance 全量。长时套件加 per_suite_only: true
+  # 只允许 --suite 单独运行（如 bench-long-*）：
   #   - name: "bench-long"
   #     command: "python3 tests/test_stress.py -d 120"
   #     timeout: 300
@@ -155,7 +157,7 @@ levels:
   zigtester init [--dir <path>]         为项目生成初始 zigtester.yaml
 
 run 选项：
-  --level unit|functional|performance|all  测试层级（默认 all）
+  --level unit|functional|performance|performance-scenarios|all  测试层级（默认 all）
   --suite <name>                                  运行指定套件
   --all                                            运行所有已发现项目
   --report-format terminal|markdown|json           输出格式（默认 terminal）
@@ -319,14 +321,14 @@ class ProjectConfig:
     project: str
     description: str = ""
     settings: ProjectSettings
-    levels: dict[str, LevelConfig]     # unit/functional/performance
+    levels: dict[str, LevelConfig]     # unit/functional/performance/performance-scenarios
 
 # runner.py
 
 @dataclass
 class SuiteResult:
     suite_name: str
-    level: str                         # unit/functional/performance
+    level: str                         # unit/functional/performance/performance-scenarios
     status: str                        # PASS/FAIL/SKIP/ERROR
     duration_ms: float
     exit_code: int | None
@@ -446,9 +448,10 @@ def check_regression(current: dict, history: list[dict],
     "levels": {
       "type": "object",
       "properties": {
-        "unit":        {"$ref": "#/$defs/level"},
-        "functional":  {"$ref": "#/$defs/level"},
-        "performance": {"$ref": "#/$defs/level"}
+        "unit":                 {"$ref": "#/$defs/level"},
+        "functional":           {"$ref": "#/$defs/level"},
+        "performance":          {"$ref": "#/$defs/level"},
+        "performance-scenarios":{"$ref": "#/$defs/level"}
       }
     }
   },
@@ -471,7 +474,9 @@ def check_regression(current: dict, history: list[dict],
 }
 ```
 
-## 6 个兄弟项目的 zigtester.yaml 规格
+## 兄弟项目的 zigtester.yaml 规格（示例）
+
+> 现接入 8 个兄弟项目（含 zigroute/zigunicfg）。以下为早期 6 个项目的示例配置，zigroute/zigunicfg 同构接入。
 
 ### zigfoundation
 ```yaml
@@ -555,17 +560,17 @@ levels:
 
 ## 设计依据 — 复用现有模式
 
-zigtester 不是凭空设计，而是从 6 个兄弟项目的现有测试实践中提炼共性、统一标准：
+zigtester 不是凭空设计，而是从 8 个兄弟项目的现有测试实践中提炼共性、统一标准：
 
 | 模式 | 来源 | zigtester 如何复用 |
 |------|------|-------------------|
 | `TestResult` / `TestSuite` 类 | zigbox `tests/lib/report.py` | 直接复用其四状态模型 (PASS/FAIL/SKIP/ERROR) + 三路输出 |
 | `ZigboxProcess` 生命周期 | zigbox `tests/lib/zigbox.py` | 抽象为 `TestExecutor`，支持任意子进程的 start/stop/超时/日志 |
-| 3 层测试模型 | zigbox `tests/SKILL.md` | 标准化为 `unit/functional/performance`（压力并入性能 = 分套件同层，长时套件 `bench-long-*` 经 `per_suite_only` 隔离） |
+| 4 层测试模型 | zigbox `tests/SKILL.md` | 标准化为 `unit/functional/performance/performance-scenarios`（压测/疲劳/长时套件独立层，长时套件 `bench-long-*` 经 `per_suite_only` 隔离） |
 | crypto-only → E2E 管道 | zigoutbounds `test_protocols.py` | 通过 `depends_on` 实现阶段间依赖 |
 | `benchmark.py` 指标提取 | zigoutbounds | 抽象为 `MetricExtractor` + 正则 pattern |
 | `zigbox.stat` 健康检查 | zigbox `test_all.py` | 抽象为 `ResourceMonitor`（psutil 后端） |
-| `zig build test` 输出 | 全部 6 个项目 | 内置 `zig_test` 解析器 |
+| `zig build test` 输出 | 全部 8 个项目 | 内置 `zig_test` 解析器 |
 | Markdown 报表 | zigbox `report.py::print_markdown()` | 统一 Markdown 表格格式 |
 | SKILL.md 测试文档 | zigbox `.claude/skills/tests/` | zigtester 自带轻量 `SKILL.md` |
 
@@ -626,7 +631,11 @@ def main():
 }
 ```
 
-## 分阶段实施计划
+## 分阶段实施计划（08-07 初版）
+
+> 本表为设计文档自身的阶段编号（初版 4 阶段）。执行期细化阶段与完成度见
+> `task_plan.md`「历史完成阶段总表」——Phase 1-12 + A/B/C/D（08-25）+ Phase 13
+> local-cf-dev（09-01）已全部收尾。
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|

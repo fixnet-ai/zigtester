@@ -17,86 +17,31 @@
 
 ## ✅ 已完成：性能测试架构重构（A/B/C/D，2026-08-25）
 
-> 背景：zigbox 默认 `--level performance` 只跑 4 个轻量 direct 长连接，覆盖不足。用户裁定：默认跑
-> 2 标准场景，压力/疲劳/分流移独立 `performance-scenarios` 层级。调研见 findings §9（端口真相源 =
-> `plugins/*/plugin.yaml`）。与「压测禁止 `--level` 全量」不冲突（per_suite_only 约束默认 performance 层）。
-
-- **A 参数透传**：`--args` 追加命令尾部 + 非标准参数不存历史（决策 D1 互斥）；test_args_passthrough 6/6
-- **B run 自动回归对比**（MCP-only）：save 前对 performance/performance-scenarios PASS+metrics 套件算
-  check_regression；过滤泄漏键（D2）；bench-long-socks5 端到端渲染 4 条红字回归
-- **C history 固定报表**：compact_history 三态 + print_history markdown 分支 + 组视图按成员预计算；
-  test_report_history 27→32 全绿
-- **D performance-scenarios 层级**：VALID_LEVELS/schema/list 3 处；zigbox 12 旧套件迁入 +
-  analyze_leak 显式生效；**跨层级基线保留**（runs 按 (project,suite) 键不丢）
-
-**验收**：`zigtester_list zigbox` 4 层级 ✓；bench-standard-inbound PASS（641 req/s, p99 2.8ms）✓；
-bench-long-socks5 PASS（7922 req/s, p99 6.4ms）+ analyze_leak 显式生效 + 旧 performance 层基线回归 ✓；
-MCP run 返回 4 层级 + regressions 字段、history 单套件/组视图 ✓。
-
-**附带修复**：`_is_metric_regression` 吞吐关键词补 `req_s`；回归检测 duration 归一化（08-25，总量指标
-按 duration_s 归一为每秒速率再对比，防 `--duration` 调整误判）；回归检测基线三重过滤（08-26，
-短 duration 瞬态/陈旧窗口/延迟噪声 → `_is_short_duration`/`_is_stale`/`_is_latency_metric`，27→32 全绿）。
+- 结论：新增第 4 层级 `performance-scenarios`（压测/疲劳/分流独立层）→ VALID_LEVELS/schema/list；
+  参数透传 + run 自动回归对比（MCP-only）+ history 固定报表；附带修复 `req_s` 关键词 / duration
+  归一化 / 基线三重过滤。过程与验收见 findings §9 + git log。
 
 ## ✅ 已结案：bench-standard-outbound socks/socks-xray 连接泄漏（2026-08-25）
 
-> 根因/修复在 zigoutbounds commit `481ed07`（zo `socks5.zig` `workerMain` 内联 `sess.drive()` 从不调
-> `pollSessions()` → closed session 永驻 map，每请求泄漏 2-3 fd → ~679 请求后耗尽）。完整诊断见 findings §10。
-
-- **EOF 语义定案**：重量出站 30s 挂起 = 上游 FIN 不转发；CL 语义（`test_bench.read_by_cl` 默认开）后全 PASS。
-- **ss-xray 剔除（用户裁定）**：zigbox SS 客户端 ↔ xray 2022-blake3 握手不兼容，剔除非修复。
-- **redirect 平台守卫**：`bench_outbound_cells()` 非 Linux 不枚举（macOS 平台不支持）。
-- **fd 耗尽已修（zo `481ed07` → `pollSessions()`）**：验证 `bench-standard-outbound PASS peak_fd=16`。
+- 结论：fd 耗尽根因 = zo `socks5.zig` 缺 `pollSessions()`（commit `481ed07` 修复，验证 peak_fd=16）；
+  EOF 语义定案 + ss-xray 剔除 + redirect 平台守卫等完整诊断见 findings §10 + git log。
 
 ## Phase 13：local-cf-dev 插件（2026-08-28 → 09-01 已收尾关闭）
 
-> 目标：本地部署 CF Workers/Pages 代理（yonggekkk/Cloudflare-vless-trojan 的 VLESS/Trojan-over-WS worker），
-> 经 `wrangler dev`（workerd 运行时）离线跑 zigbox/zigoutbounds 的 VLESS/Trojan+WS(+TLS) 协议 E2E。
-> 调研定论（ECH 本地不可测 / IPv4 目标 sslip.io 重写 / 127.0.0.1 非 localhost / workerd 支持 connect()）见
-> findings §11 + `plugins/local-cf-dev/README.md`。
-
-**已落地（离线验证通过，08-28）**：`plugin.yaml`（端口/凭证真相源）+ `cfdev_ctl.py`（serve/render）+ `README.md`
-+ `plugin_ports.py` 增 `cfdev_*` 派生函数。py_compile 通过；render 正确渲染 wrangler.toml + .dev.vars + 拷贝
-worker（vendor `Cloudflare-vless-trojan`）；wrangler dev 三层验证全绿；workerd 已缓存 npx，**首跑无需网络**。
-
-**设计**（复用 serve 模式）：
-```
-zigtester/plugins/local-cf-dev/
-  plugin.yaml   # workers_port 18787 / pages_port 18788 / uuid / trojan_password / local_protocol / vendor_worker_dir
-  cfdev_ctl.py  # 拷贝 worker → 渲染 wrangler.toml+.dev.vars → Popen("npx wrangler dev") → TCP 探活 18787
-  README.md     # 用法 + ECH 局限
-```
-`lifecycle.build = "npx wrangler --version"`；`ready_on: tcp 127.0.0.1:18787`。
-E2E 数据路径：zigbox vless+ws → 127.0.0.1:18787(workerd) → worker 解析 VLESS 头 →
-`connect({hostname:"localhost"})` → 127.0.0.1:13333(local-echo) → 回程。
-
-**开放待办（本文件唯一开放项，勿在本次混入）**：
-
-> **✅ Phase 13 已收尾关闭（09-01，用户裁定）**：消费方接入 zigoutbounds ✅ 闭环（`zo zigtester.yaml:12` 插件声明 + L220-237 两套件，PASS 历史）；**zigbox 侧裁决「不接」**（纯编排层冗余，CF 兼容性独有价值全在协议层 zo；「CF 2 字节响应头 [version,0]」实为**标准 VLESS 服务器响应头** zo `vless.zig:1175` parseResponseLen，非 CF 专属 hack）；`wrangler dev` 启动 ✅ 闭环；**27.2 early data（WS 0-RTT）记文档化后续项**（客户端当前不发 early data、zo 侧未验证，非阻塞）。`local-cf-dev` 插件保留为 zo 专属插件。调研详情 + 依据见 zigbox `findings.md`「Phase 13 local-cf-dev 收尾调研」段。
-> **遗留（非阻塞后续项）**：27.2 CF 形态 early data 验证（客户端可选优化）；如未来补 zigbox ws 全链路，优先复用 sing-box/xray 对端（zo 已建 vless-ws→xray:16905 / trojan-ws→sing-box:16806），成本远低于 CF worker。
+- 结论：本地 CF Workers/Pages VLESS/Trojan-over-WS E2E 插件已落地并收尾（09-01 用户裁定关闭，
+  `local-cf-dev` 保留为 zo 专属插件）。设计/调研定论（ECH 本地不可测 / workerd 支持 connect() 等）
+  见 findings §11 + `plugins/local-cf-dev/README.md`；收尾裁决 + 依据见 zigbox `findings.md`
+  「Phase 13 local-cf-dev 收尾调研」段。
+- **遗留（非阻塞，文档化后续项）**：27.2 CF 形态 early data（WS 0-RTT）验证——客户端当前不发
+  early data、zo 侧未验证；如未来补 zigbox ws 全链路，优先复用 sing-box/xray 对端（成本远低于 CF worker）。
 
 ## 开放待办（历史，均已闭环）
 
-### zt-6：long 套件后 zigbox 残留 → 环境自愈假失败（2026-08-31 修复）
-
-> 现象：long 套件结束后 zigbox 仍 listen 12080 → 下套件 self-heal 检测端口冲突 SIGTERM local-echo
-> → 后续套件假失败（一度误判代码回归）。来源：2026-08-30 全协议性能重测（zigbox findings commit b042651）。
-
-- **zigtester 侧（08-31，方案 1）**：runner.py 进程组兜底——`_start_process` 加 `start_new_session=True`；
-  `execute()` finally 末尾 `_kill_test_proc_tree`（SIGTERM → 2s → SIGKILL killpg 整组，插件独立组不误伤）；
-  单测 `test_runner_cleanup` 2 passed；集成 `bench-socks5`/`bench-long-socks5` PASS 且 12080 FREE。
-- **zigbox 侧治本（08-31）**：`test_bench.py` `_zigbox_ensure_running` 返回 `ZigboxProcess` 对象 + main()/
-  run_standard_inbound try/finally `zb.stop()`（zigtester 兜底保留防第三方残留）。
-- **教训**：FAIL 排查先查环境自愈残留/SIGTERM/端口占用，再归因代码；A/B 必须环境隔离。
-
-### zt-9：launchd ProcessType Background → Interactive（09-01 收尾）
-
-> 来源：zigoutbounds unit 持续 FAIL exit=1（08-29 起历史 10 连）。现象：`1m MaxRSS:806M~923M` =
-> zigoutbounds-tests **编译**被杀（编译主测试二进制需 ~1GB 峰值）；MCP 服务以 launchd `ProcessType: Background`
-> 运行（autostart.py:93 硬编码）→ 继承 jetsam 内存配额 + 降调度（同源 `1m` vs 本地直跑 `17s`）。
-
-- **修复（09-01）**：`autostart.py` Background → **Interactive** + 注释根因 + `zigtester install --dir fixnet`
-  重装重启 MCP 服务。**验证**：`zigtester_run zigoutbounds --level unit` **435/435 PASS ×2**（11s/16s）。
-- **教训**：MCP/测试服务进程类型必须匹配其工作负载（派生大编译），Background 隐含内存/调度上限。
+- **zt-6（08-31 修复）**：long 套件后 zigbox 残留致环境自愈假失败 → zigtester runner.py 进程组兜底
+  （`start_new_session` + `_kill_test_proc_tree`）+ zigbox 侧 try/finally stop 治本。结论见 findings 定论表 zt-6 行。
+- **zt-7（已闭环）**：Windows taskkill 分支 + `os.kill(pid,0)` 陷阱。见 findings 定论表 zt-7 行。
+- **zt-8（已闭环）**：FAIL 透传 test 脚本 stdout 尾部。见 findings 定论表 zt-8 行。
+- **zt-9（09-01 收尾）**：launchd `ProcessType: Background` → Interactive（编译被杀根因，autostart.py:93 注释）。见 findings 定论表 zt-9 行。
 
 ## 历史完成阶段总表（Phase 1-12，全部完成）
 
