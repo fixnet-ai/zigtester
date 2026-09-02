@@ -392,17 +392,62 @@ def list_projects() -> list[dict]:
     return [{"id": row["id"], "name": row["name"], "path": row["path"]} for row in rows]
 
 
+def _is_infra_failure(record: dict) -> bool:
+    """判断 FAIL 记录是否属于构建/环境类失败（非测试断言失败）。
+
+    2026-09-02 审计：#14 实证 zo/zigtun all-tests 历史反复快速 FAIL 实为源码
+    编译错误中间态（zig build test 编译失败时主测试 step 无计数行，仅部分成功
+    step 或 fallback 有计数），却被 parser 误报 "2/2 passed" 或 "1/1 failed"
+    → detect_flaky 把这些构建失败当作真实测试翻转 → 污染 4+ 仓 flaky。
+    """
+    metrics = record.get("metrics") or {}
+    exit_code = record.get("exit_code")
+    if exit_code == 0:
+        return False
+    # 新记录：parser 识别编译错误特征（metrics.py _parse_zig_test）
+    if metrics.get("build_failure", 0) == 1:
+        return True
+    # 无 parser 测试计数（metrics 无 tests_total，如 line_count parser 产出、
+    # 迁移旧记录）→ 无法区分构建失败，按真实失败计入
+    if metrics.get("tests_total") is None:
+        return False
+    try:
+        total = float(metrics.get("tests_total", 0) or 0)
+        failed = float(metrics.get("tests_failed", 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    if total == 0:
+        return False
+    # 旧记录（无 build_failure 字段）：编译失败时测试根本没跑完，
+    # 计数要么缺失落到成功 step（tests_failed==0）、要么 fallback 1/1
+    # （tests_total==1）——二者都不是断言失败
+    if failed == 0:
+        return True
+    if total == 1 and failed == 1:
+        return True
+    return False
+
+
 def detect_flaky(records: list[dict], window: int = 8) -> bool:
     """检测套件是否 flaky（结果不稳定）。
 
     取最近 window 条记录的 status 序列，PASS 与 FAIL/ERROR 之间
     翻转次数 >= 2 视为 flaky。记录不足 4 条返回 False。
+    构建/环境类失败（_is_infra_failure：编译错误/超时等测试未真正运行的
+    FAIL）不计入翻转——否则开发中源码编译错误的快速 PASS/FAIL 反复会把
+    套件误判 flaky。
     """
     if len(records) < 4:
         return False
 
-    statuses = [r.get("status", "") for r in records[:window]]
-    flags = [s == "PASS" for s in statuses if s in ("PASS", "FAIL", "ERROR")]
+    flags: list[bool] = []
+    for r in records[:window]:
+        s = r.get("status", "")
+        if s not in ("PASS", "FAIL", "ERROR"):
+            continue
+        if s == "FAIL" and _is_infra_failure(r):
+            continue  # 构建/环境失败，非测试结果翻转
+        flags.append(s == "PASS")
     flips = sum(1 for i in range(1, len(flags)) if flags[i] != flags[i - 1])
     return flips >= 2
 

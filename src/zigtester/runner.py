@@ -481,8 +481,15 @@ class TestExecutor:
         if result.exit_code is not None and result.exit_code != 0:
             parts.append(f"exit={result.exit_code}")
 
+        # 构建失败（编译错误）：message 明确标注，不再沿用误导性的
+        # "exit=1; N/N passed"（多 test step 下成功 step 的 pass 行会让
+        # parser 误以为测试全过）。见 metrics.py _parse_zig_test build_failure。
+        if result.exit_code is not None and result.exit_code != 0 and m.get("build_failure", 0) == 1:
+            parts.append("build_failure(编译错误, 测试未运行)")
+
         # zig_test / test_protocols 类指标
-        if m.get("tests_total", 0) > 0:
+        # build_failure 时计数不可靠（成功 step 的 pass 行残留），只报构建失败
+        if m.get("build_failure", 0) == 0 and m.get("tests_total", 0) > 0:
             parts.append(
                 f"{int(m['tests_passed'])}/{int(m['tests_total'])} passed"
             )

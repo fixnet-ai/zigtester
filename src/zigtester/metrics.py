@@ -111,6 +111,9 @@ class MetricExtractor:
           - "All X tests passed." (Zig 单文件测试)
           - "X passed; Y skipped; Z failed." (Zig 0.14+)
           - Zig 0.16 --listen=- TAP 协议 (无 test count 文本行)
+          - Zig 0.16 `--summary all` run 行 (多 test step):
+            "N pass (N total)" / "N pass, K skip (T total)" /
+            失败变体 "N pass, M fail (T total)"
 
         当无 test count 文本行时由 exit_code 驱动判断:
           exit_code=0 → 视为通过 (tests_total=1, tests_passed=1)
@@ -125,9 +128,36 @@ class MetricExtractor:
             "tests_failed": 0.0,
         }
 
-        # 匹配 "123/125 passed; 2 skipped"
-        m = re.search(r"(\d+)/(\d+)[ \t]+passed[ \t]*;[ \t]*(\d+)[ \t]+skipped", stdout)
+        # 构建失败检测：zig build test 编译错误时 stdout 含 "error: N compilation
+        # errors"。多 test step（如 zo = 主测试 + pool 附加 2 测试）下编译失败的
+        # step 无计数行，其余成功 step 仍跑完输出 pass 行 → parser 会报 "N/N
+        # passed" 掩盖构建失败，message 矛盾（"exit=1; 2/2 passed"）且污染 flaky。
+        # 单独标 build_failure=1 供 history 区分「测试断言失败」与「构建失败」
+        # （2026-09-02 实证：zo/zigtun all-tests 反复快速 FAIL 实为源码编译错误
+        # 中间态，zigtester 仓库外 git 编译一触发即 FAIL）。
+        build_failure = (
+            exit_code != 0
+            and re.search(r"error:[ \t]+\d+[ \t]+compilation errors", stdout) is not None
+        )
+
+        # ① 失败 run 行优先（zig 0.16 --summary all 断言失败格式，2026-09-02
+        #    实测 pool.zig "1 pass, 1 fail (2 total)"）。多 test step 下必须优先
+        #    于 pass-only 行，否则主 step 断言失败时会被 pool 等成功 step 的
+        #    "N pass (N total)" 掩盖成"全部通过"。
+        m = re.search(
+            r"(\d+)[ \t]+pass(?:,[ \t]*(\d+)[ \t]+skip)?,[ \t]*(\d+)[ \t]+fail"
+            r"[ \t]+\((\d+)[ \t]+total\)",
+            stdout,
+        )
         if m:
+            result["tests_passed"] = float(m.group(1))
+            result["tests_skipped"] = float(m.group(2) or 0)
+            result["tests_failed"] = float(m.group(3))
+            result["tests_total"] = float(m.group(4))
+        # ② "123/125 passed; 2 skipped"
+        elif m := re.search(
+            r"(\d+)/(\d+)[ \t]+passed[ \t]*;[ \t]*(\d+)[ \t]+skipped", stdout
+        ):
             passed = int(m.group(1))
             total = int(m.group(2))
             skipped = int(m.group(3))
@@ -135,23 +165,17 @@ class MetricExtractor:
             result["tests_total"] = float(total)
             result["tests_skipped"] = float(skipped)
             result["tests_failed"] = float(total - passed - skipped)
-            return result
-
-        # 匹配 "All X tests passed."
-        m = re.search(r"All[ \t]+(\d+)[ \t]+tests?[ \t]+passed", stdout)
-        if m:
+        # ③ "All X tests passed."
+        elif m := re.search(r"All[ \t]+(\d+)[ \t]+tests?[ \t]+passed", stdout):
             total = int(m.group(1))
             result["tests_passed"] = float(total)
             result["tests_total"] = float(total)
-            return result
-
-        # 匹配 "93 pass, 1 skip (94 total)" — Zig 0.16 --listen=- 带 skip 变体
-        # （如 zigdns 93/94 passed 1 skipped）
-        m = re.search(
+        # ④ "93 pass, 1 skip (94 total)" — Zig 0.16 --listen=- 带 skip 变体
+        #    （如 zigdns 93/94 passed 1 skipped）
+        elif m := re.search(
             r"(\d+)[ \t]+pass,[ \t]+(\d+)[ \t]+skip[ \t]+\((\d+)[ \t]+total\)",
             stdout,
-        )
-        if m:
+        ):
             passed = int(m.group(1))
             skipped = int(m.group(2))
             total = int(m.group(3))
@@ -159,24 +183,19 @@ class MetricExtractor:
             result["tests_skipped"] = float(skipped)
             result["tests_total"] = float(total)
             result["tests_failed"] = float(total - passed - skipped)
-            return result
-
-        # 匹配 "202 pass (202 total)" — Zig 0.16 --listen=- 输出格式
-        # （如 "run test zigbox-tests 202 pass (202 total) 56ms MaxRSS:11M"）。
-        # 0.16 的 listen 模式其实有 count 行，此前 fallthrough 到 exit_code
-        # 驱动会误报 1/1（2026-08-18 实测 zig build test 202 测试误记 1）。
-        m = re.search(r"(\d+)[ \t]+pass[ \t]+\((\d+)[ \t]+total\)", stdout)
-        if m:
+        # ⑤ "202 pass (202 total)" — Zig 0.16 --listen=- 输出格式
+        #    （如 "run test zigbox-tests 202 pass (202 total) 56ms MaxRSS:11M"）。
+        #    0.16 的 listen 模式其实有 count 行，此前 fallthrough 到 exit_code
+        #    驱动会误报 1/1（2026-08-18 实测 zig build test 202 测试误记 1）。
+        elif m := re.search(r"(\d+)[ \t]+pass[ \t]+\((\d+)[ \t]+total\)", stdout):
             result["tests_passed"] = float(m.group(1))
             result["tests_total"] = float(m.group(2))
-            return result
-
-        # 匹配 "X passed; Y skipped; Z failed." (Zig 0.14+ 格式)
-        m = re.search(
-            r"(\d+)[ \t]+passed[ \t]*;[ \t]*(\d+)[ \t]+skipped[ \t]*;[ \t]*(\d+)[ \t]+failed",
+        # ⑥ "X passed; Y skipped; Z failed." (Zig 0.14+ 格式)
+        elif m := re.search(
+            r"(\d+)[ \t]+passed[ \t]*;[ \t]*(\d+)[ \t]+skipped[ \t]*;[ \t]*(\d+)"
+            r"[ \t]+failed",
             stdout,
-        )
-        if m:
+        ):
             p = int(m.group(1))
             s = int(m.group(2))
             f = int(m.group(3))
@@ -184,33 +203,30 @@ class MetricExtractor:
             result["tests_skipped"] = float(s)
             result["tests_failed"] = float(f)
             result["tests_total"] = float(p + f + s)
-            return result
-
-        # 匹配 "X passed; Y failed; Z skipped" (备用)
-        # 使用 stricter 正则：仅匹配测试汇总行，而非日志中的随机数字
-        # 测试汇总行特征：以数字开头，"passed"/"failed"/"skipped" 是行中的主要词汇
-        m_p = re.search(r"^(\d+)[ \t]+passed", stdout, re.MULTILINE)
-        m_f = re.search(r"^(\d+)[ \t]+failed", stdout, re.MULTILINE)
-        m_s = re.search(r"^(\d+)[ \t]+skipped", stdout, re.MULTILINE)
-        if m_p or m_f or m_s:
-            p = int(m_p.group(1)) if m_p else 0
+        # ⑦ "X passed; Y failed; Z skipped" (备用)
+        #    使用 stricter 正则：仅匹配测试汇总行，而非日志中的随机数字
+        #    测试汇总行特征：以数字开头，"passed"/"failed"/"skipped" 是行中的主要词汇
+        elif m_p := re.search(r"^(\d+)[ \t]+passed", stdout, re.MULTILINE):
+            p = int(m_p.group(1))
+            m_f = re.search(r"^(\d+)[ \t]+failed", stdout, re.MULTILINE)
+            m_s = re.search(r"^(\d+)[ \t]+skipped", stdout, re.MULTILINE)
             f = int(m_f.group(1)) if m_f else 0
             s = int(m_s.group(1)) if m_s else 0
             result["tests_passed"] = float(p)
             result["tests_failed"] = float(f)
             result["tests_skipped"] = float(s)
             result["tests_total"] = float(p + f + s)
-            return result
-
-        # 无任何 test count 文本行 → 由 exit_code 驱动
-        # 用于 Zig 0.16 --listen=- TAP 协议等不输出传统测试汇总的格式
-        if exit_code != 0:
+        # ⑧ 无任何 test count 文本行 → 由 exit_code 驱动
+        #    用于 Zig 0.16 --listen=- TAP 协议等不输出传统测试汇总的格式
+        elif exit_code != 0:
             result["tests_total"] = 1.0
             result["tests_failed"] = 1.0
         else:
             result["tests_total"] = 1.0
             result["tests_passed"] = 1.0
 
+        if build_failure:
+            result["build_failure"] = 1.0
         return result
 
     @staticmethod
