@@ -31,6 +31,9 @@
 | zt-8 FAIL 透传 test 脚本 stdout 尾部 | `src/zigtester/reporter.py` `compact_markdown` |
 | zt-9 launchd ProcessType Background→Interactive（编译被杀根因） | `src/zigtester/autostart.py:93` 注释 |
 | local-cf-dev 插件关键事实（ECH 不可测/域名目标/127.0.0.1/证书） | `plugins/local-cf-dev/README.md` + `cfdev_ctl.py` docstring |
+| masque-echo CONNECT-IP echo 语义 + PLUGIN_HOST（CONNECT-IP :authority 严格匹配，host 化场景须覆盖） | `plugins/masque-echo/plugin.yaml` config 段 + `main.go` 头部 |
+| masque-echo stateless TCP 反射器（SYN/数据/FIN 无状态推算，仅 IPv4+TCP；UDP 32.5g 翻转 src/dst） | `plugins/masque-echo/tcp_echo.go` 头部 |
+| masque-echo-mtls mTLS 变体（复用 masque-echo 源码，client_ca 校验；独立端口 13410/13411） | `plugins/masque-echo-mtls/plugin.yaml` config 段 |
 
 ## 测试方法（仍有效，非代码）
 

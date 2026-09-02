@@ -13,7 +13,7 @@
 - zigtester 自身单测全绿：test_args_passthrough 6 + test_env_guard 15 + test_per_suite_only 4 +
   test_report_history 32 + test_runner_cleanup 2 + test_runner_env/test_plugin_ports/test_target_monitor。
 - 兄弟项目全部接入 zigtester（zigfoundation/zigbox/zigtun/zigproxy/zigdns/zigoutbounds + zigroute/zigunicfg）。
-- **zt-6/zt-7/zt-8/zt-9 全部闭环**（见「开放待办（历史）」）；**进行中：local-cf-dev 插件（Phase 13）**。
+- **zt-6/zt-7/zt-8/zt-9 全部闭环**（见「开放待办（历史）」）；**Phase 13 local-cf-dev 插件已收尾关闭（09-01，用户裁定）**，见下方专段。
 
 ## ✅ 已完成：性能测试架构重构（A/B/C/D，2026-08-25）
 
@@ -47,7 +47,7 @@ MCP run 返回 4 层级 + regressions 字段、history 单套件/组视图 ✓�
 - **redirect 平台守卫**：`bench_outbound_cells()` 非 Linux 不枚举（macOS 平台不支持）。
 - **fd 耗尽已修（zo `481ed07` → `pollSessions()`）**：验证 `bench-standard-outbound PASS peak_fd=16`。
 
-## Phase 13：local-cf-dev 插件（2026-08-28，进行中）
+## Phase 13：local-cf-dev 插件（2026-08-28 → 09-01 已收尾关闭）
 
 > 目标：本地部署 CF Workers/Pages 代理（yonggekkk/Cloudflare-vless-trojan 的 VLESS/Trojan-over-WS worker），
 > 经 `wrangler dev`（workerd 运行时）离线跑 zigbox/zigoutbounds 的 VLESS/Trojan+WS(+TLS) 协议 E2E。

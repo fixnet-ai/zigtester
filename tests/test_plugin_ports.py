@@ -67,6 +67,10 @@ def test_named_accessors_match_config():
     assert plugin_ports.singbox_api_port() == 9090
     assert plugin_ports.singbox_port("ss_port") == plugin_ports.config_port("sing-box", "ss_port")
     assert plugin_ports.xray_readiness_port() == plugin_ports.config_port("xray-core", "readiness_port")
+    assert plugin_ports.masque_echo_port() == plugin_ports.config_port("masque-echo", "masque_port")
+    assert plugin_ports.masque_echo_ready_port() == plugin_ports.config_port("masque-echo", "ready_port")
+    assert plugin_ports.masque_mtls_port() == plugin_ports.config_port("masque-echo-mtls", "masque_port")
+    assert plugin_ports.masque_mtls_ready_port() == plugin_ports.config_port("masque-echo-mtls", "ready_port")
 
 
 def test_singbox_template_renders_via_singbox_ctl():

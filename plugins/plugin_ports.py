@@ -296,3 +296,26 @@ def cfdev_trojan_password() -> str:
 def cfdev_local_protocol() -> str:
     """local-cf-dev 本地协议（http | https，https 供 vless+ws+tls 客户端连入）。"""
     return config_credential("local-cf-dev", "local_protocol")
+
+
+# ── masque-echo / masque-echo-mtls 插件（CONNECT-IP echo）─────────
+
+
+def masque_echo_port() -> int:
+    """masque-echo CONNECT-IP QUIC 监听端口（UDP :13400）。"""
+    return config_port("masque-echo", "masque_port")
+
+
+def masque_echo_ready_port() -> int:
+    """masque-echo readiness 探针端口（TCP :13401）。"""
+    return config_port("masque-echo", "ready_port")
+
+
+def masque_mtls_port() -> int:
+    """masque-echo-mtls CONNECT-IP QUIC 监听端口（UDP :13410，mTLS 变体）。"""
+    return config_port("masque-echo-mtls", "masque_port")
+
+
+def masque_mtls_ready_port() -> int:
+    """masque-echo-mtls readiness 探针端口（TCP :13411）。"""
+    return config_port("masque-echo-mtls", "ready_port")
