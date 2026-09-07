@@ -211,7 +211,8 @@
         "network": "ws",
         "security": "tls",
         "wsSettings": {
-          "path": "/vless-ws"
+          "path": "/vless-ws",
+          "maxEarlyData": 2048
         },
         "tlsSettings": {
           "certificates": [

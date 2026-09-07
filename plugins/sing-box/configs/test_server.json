@@ -315,7 +315,8 @@
       },
       "transport": {
         "type": "ws",
-        "path": "/vless-ws"
+        "path": "/vless-ws",
+        "max_early_data": 2048
       }
     },
     {
@@ -336,7 +337,8 @@
       },
       "transport": {
         "type": "ws",
-        "path": "/trojan-ws"
+        "path": "/trojan-ws",
+        "max_early_data": 2048
       }
     },
     {
