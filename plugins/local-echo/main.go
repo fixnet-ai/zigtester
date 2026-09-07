@@ -16,6 +16,13 @@
 //   - CONNECT 隧道 → 200 Connection Established → echo
 //   - H2/H3 echo:请求体原样回显,无请求体回固定文本 "h2h3-echo-ok"
 //
+// 跨仓数据面契约（改动前必读）:
+//   - bench :13337 = short-conn echo,响应后 10ms idle 主动 FIN（见 handleStream idleCloseTimeout）。
+//     该 FIN 语义是下游协议隐式契约——2026-08-19 曾以 10ms idle 主动 FIN 暴露 zigoutbounds
+//     潜伏 UAF（relay/deinit 双 tun.close 竞态,zo 已修 tun_relayed）。
+//   - 任何 echo 行为变更（主动 FIN / FIN 时序 / UDP 反射翻转 / 端口=0 关闭）都会改变下游全部
+//     协议 E2E/压测语义;落地此类变更后必须主动触发下游项目全量压测回归,不得只跑单插件自测。
+//
 // 用法:
 //   ./local-echo [--tcp-port 13333] [--dns-port 5533] [--upstream-dns 8.8.8.8]
 //                [--h2-port 13335] [--h3-port 13336] [--cert ...] [--key ...]

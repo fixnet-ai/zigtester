@@ -662,7 +662,14 @@ def _plugin_proc_hints(plugin: PluginConfig) -> list[str]:
 
 
 def _pkill_names(plugin: PluginConfig) -> None:
-    """按插件 kill 名单 + 启动命令特征清理残留进程。"""
+    """按插件 kill 名单 + 启动命令特征清理残留进程。
+
+    自匹配陷阱（pkill -f）：模式会匹配发起命令的进程自身命令行——若 shell 命令行
+    含该串（如 `pkill -f "local-echo --tcp-port"`），pkill 会把自己的父 shell 一并杀掉
+    （signal 发给自己所在进程组）。交互式排查时规避 = `pgrep -f "[l]ocal-echo ..."`
+    字符类正则使模式不匹配字面自身；本函数以 plugin.yaml kill 名单为准，名单 token
+    刻意用短名（local-echo/sing-box/…）而非常见长命令行，正是为避免误杀。
+    """
     names = _plugin_proc_hints(plugin)
     for name in names:
         if name in (".", "..") or len(name) < 3:

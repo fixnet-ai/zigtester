@@ -7,8 +7,9 @@
 > **已删章节锚点一律以 git log 为准。** 本文档只承载仍在生效的决策；未完成任务已移交
 > zigbox 统一规划（zigbox task_plan.md『跨项目统一待办』）——本文件开放待办仅保留不在统一待办中的项。
 
-## 当前状态（2026-09-01）
+## 当前状态（2026-09-01 内容基线；代码自 09-02 冻结 95d36b2）
 
+- **代码自 09-02 冻结（95d36b2 = HEAD）**：本仓 tag v0.34/v0.35/v0.36 均指该 commit；生态 tag 已推进至 v0.37.0（09-06，同 commit，期间生态开发对 zigtester 无代码影响）。
 - 分支 `main`，全部 Phase 1-12 完成（2026-08-07 → 08-21）+ A/B/C/D 性能架构重构完成（08-25）。
 - zigtester 自身单测全绿：test_args_passthrough 6 + test_env_guard 15 + test_per_suite_only 4 +
   test_report_history 32 + test_runner_cleanup 2 + test_runner_env/test_plugin_ports/test_target_monitor。
@@ -32,16 +33,11 @@
   `local-cf-dev` 保留为 zo 专属插件）。设计/调研定论（ECH 本地不可测 / workerd 支持 connect() 等）
   见 findings §11 + `plugins/local-cf-dev/README.md`；收尾裁决 + 依据见 zigbox `findings.md`
   「Phase 13 local-cf-dev 收尾调研」段。
-- **遗留（非阻塞，文档化后续项）**：27.2 CF 形态 early data（WS 0-RTT）验证——客户端当前不发
-  early data、zo 侧未验证；如未来补 zigbox ws 全链路，优先复用 sing-box/xray 对端（成本远低于 CF worker）。
+- **遗留（非阻塞）已移交**：27.2 CF 形态 early data（WS 0-RTT）验证——客户端当前不发 early data、zo 侧未验证；该开放后续项已移交 **zigbox 统一待办 zo 组**登记（09-07 第 8 次瘦身），见其 zo 表，本仓不再保留开放项正文。
 
 ## 开放待办（历史，均已闭环）
 
-- **zt-6（08-31 修复）**：long 套件后 zigbox 残留致环境自愈假失败 → zigtester runner.py 进程组兜底
-  （`start_new_session` + `_kill_test_proc_tree`）+ zigbox 侧 try/finally stop 治本。结论见 findings 定论表 zt-6 行。
-- **zt-7（已闭环）**：Windows taskkill 分支 + `os.kill(pid,0)` 陷阱。见 findings 定论表 zt-7 行。
-- **zt-8（已闭环）**：FAIL 透传 test 脚本 stdout 尾部。见 findings 定论表 zt-8 行。
-- **zt-9（09-01 收尾）**：launchd `ProcessType: Background` → Interactive（编译被杀根因，autostart.py:93 注释）。见 findings 定论表 zt-9 行。
+- 全闭环史实不在此逐条复述：**zt-2/zt-6/zt-7/zt-8/zt-9** 的结论与锚点统一见 **zigbox task_plan『跨项目统一待办』zigtester 分组表** 与本仓 findings「定论位置表」zt-6..zt-9 行（进程组兜底 / Windows taskkill 分支 / FAIL stdout 尾部透传 / launchd Interactive）。本文件仅留此一条交叉锚点。
 
 ## 历史完成阶段总表（Phase 1-12，全部完成）
 

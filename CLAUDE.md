@@ -125,6 +125,12 @@ ZIGTESTER_ROOT=~/works/2025/fixnet python -m zigtester.server &
 # 启动后监听 http://127.0.0.1:9020/mcp，PID 文件 ~/.zigtester/server.pid
 ```
 
+### 运行/调试经验（zo 压测实证，2026-09-07 下沉）
+
+- **源码改动后首个压测套件可能被 timeout 误杀**：全量重编译 >60s > 套件默认 timeout=60 → 误判 FAIL。判定前先区分 build vs 测试阶段（缓存命中后 11.3s，实测 bench-tcp-direct 78s→命中 11.3s）。
+- **改常驻 server 代码（plugin.py/plugins/*）后须重启才生效**：launchctl 托管用 `launchctl kickstart -k <service>`，仅重跑测试不触发加载。
+- xray 锻造循环探针属 reality 域，用 `:18444` 不受信 TLS echo 规避 → 已注 local-echo main.go reality-tls-echo 区，此处不再重复。
+
 ## 组件标识
 
 | 标识 | 模块 |

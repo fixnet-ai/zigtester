@@ -4,6 +4,8 @@
 > 瘦身（第 2 轮 08-23 + 第 4 轮 08-27 + 第 5 轮 09-01）：技术定论均已下沉到对应代码头部/函数注释或
 > 插件 README，此处只留「定论位置表」指针；Zig 0.16 语言经验交 zig-codegen；久远历史/被推翻结论已删。
 > 保留章节号（§X）供 task_plan 历史总表跳转与 git 追溯。
+> **代码自 09-02 冻结（95d36b2 = HEAD）**：本仓 tag v0.34/v0.35/v0.36 均指该 commit，生态 tag 已推进至 v0.37.0
+> （09-06，同 commit，无代码影响）；下文行内计数是快照，入站端口/数量一律以 `plugins/*/plugin.yaml` 现行值复核。
 
 ## 定论位置表（技术定论已下沉代码注释/插件 README，不在此重复正文）
 
@@ -39,8 +41,8 @@
 ## 测试方法（仍有效，非代码）
 
 - **HTTP_PROXY 劫持 localhost**：任何访问 127.0.0.1 的 HTTP 客户端必须禁用代理（requests `trust_env=False` / urllib `ProxyHandler({})`），否则在有代理的开发机上必挂。
-- **pkill/pgrep 自匹配陷阱**：`pkill -f "local-echo --tcp-port"` 时外层 shell 命令行自身含该串 → 杀了自己。规避 `pgrep -f "[l]ocal-echo --tcp-port"`（字符类正则使模式不匹配字面自身）。
-- **echo 连接生命周期语义是下游协议隐式契约**：local-echo bench :13337 改为响应后 10ms idle 主动 FIN → 暴露 zo 潜伏 UAF（relay/deinit 双 tun.close 竞态，zo 已修 tun_relayed）。此类行为变更落地后应主动触发下游项目全量压测回归。
+- **pkill/pgrep 自匹配陷阱**（已下沉）→ `src/zigtester/plugin.py` `_pkill_names` 头注：`pkill -f "local-echo --tcp-port"` 时外层 shell 命令行自身含该串会误杀自己，规避 = `pgrep -f "[l]ocal-echo..."` 字符类正则。
+- **echo 连接生命周期语义 = 下游协议隐式契约**（已下沉）→ `plugins/local-echo/main.go` 头部「跨仓数据面契约」：bench :13337 响应后 10ms idle 主动 FIN 曾暴露 zo 潜伏 UAF（relay/deinit 双 tun.close，zo 已修 tun_relayed）；echo 行为变更落地后须触发下游全量压测回归。
 - **单请求 / 全量铁律**：全链路 loopback 单请求 ≤100ms，超过当失败；全部功能+性能 1 分钟内跑完，超过 = 失败止损修根因，禁止降级/排除。
 - **MCP 服务改动需重启**：server.py/runner.py 改动后 launchctl kickstart 重启才生效——忘记重启 = 改动「不生效」假象。
 
@@ -52,25 +54,16 @@
 - **local-echo python 实现（echo_server.py）** → 2026-08-17 被 Go 单程序统一重写。
 - **route.final 兜底非 direct 出站有数据面 bug（08-25 撤销）** → 源码逐层核查无缺陷；真实状态 = socks fd 耗尽 + 重量出站挂起，根因归出站侧（见 §10 指针）。
 
-## §11 local-cf-dev 插件调研（2026-08-28，Phase 13 进行中）
+## §11 local-cf-dev 插件调研（2026-08-28，Phase 13 已收尾）
 
-> 任务：查证 `local-cf-dev.md` 文档 + 设计 zigtester 新插件（本地 CF Workers/Pages 代理，配合 zigbox/zigoutbounds 做 VLESS/Trojan 协议 E2E）。参考 `vendor/Cloudflare-vless-trojan`（yonggekkk，commit 25a9017，作者声明暂停维护）。完整事实见插件 README + `cfdev_ctl.py` docstring。
+> 任务与本调研完整事实已下沉，不在此复述正文：ECH 本地不可测 / workerd `connect()` 支持 / 127.0.0.1 vs localhost / `--local-protocol https` 证书复用 / sslip.io 域名重写 / wrangler 三层验证等，**完整事实见 `plugins/local-cf-dev/README.md` + `cfdev_ctl.py` docstring + 定论位置表 local-cf-dev 行**。
 
-- **文档查证**：基本属实，但它是「通用 CF 本地开发教程」非本项目 E2E 方案；缺两点——未提 `cloudflare:sockets connect()`（worker 核心能力，本地 workerd **完整支持**，这是离线 E2E 的根基）、完全没提 ECH。
-- **worker 数据路径**：fetch 收 WS Upgrade → `webSocket.accept()` → 解析 VLESS/Trojan 头 → `connect({hostname,port})` 连目标 → 双向 relay；失败 retry 兜底 `proxyIP`。VLESS 默认 uuid `86c50e3a-5b87-49dd-bd20-03c7f2735e40`，Trojan 默认密码 `trojan`。
-- **关键技术事实**：
-  1. **本地 workerd 支持 connect() 且不拦回环** → worker 可连 127.0.0.1 local-echo（生产 CF 会拦 127.x/10.x）。
-  2. **一律 `127.0.0.1`，别用 `localhost`**（Node 可能解析 `::1`，workerd 解析 `127.0.0.1`，PR #12913）。
-  3. **`--local-protocol https`**（或 `[dev] local_protocol`）启用本地 HTTPS；**复用生态 localhost 证书**（`plugins/local-echo/certs/`，经 `--https-cert-path/key-path` 注入，实测 wrangler 4.127 支持）。
-  4. **worker 会把 IPv4 目标重写成 `www.<ip>.sslip.io`** → E2E 客户端 VLESS 目标必须用域名（atyp=0x02，如 `localhost`），worker 才直连本机。
-  5. **ECH 本地不可测（定论）**：workerd 不做 ECH 终止（ECH 是 CF 边缘 TLS 终止特性）；插件 E2E 只覆盖 VLESS/Trojan + WS + TLS（非 ECH）。
-  6. **wrangler dev 三层验证全绿（08-28）**：render → 冒烟（`Ready on 127.0.0.1:18787`）→ relay（VLESS 头 32 字节解析 + payload 原样回显）；**workerd 已缓存 `~/.npm/_npx/`，首跑无需网络**。
-- **插件设计决策**：复用 serve 模式（`cfdev_ctl.py`）；端口 workers 18787 / pages 18788；worker 源经 config 引用 vendor（不复制混淆 JS）；**协议覆盖边界** = 只 VLESS/Trojan（s5http 不接入，socks5/http 已由 sing-box 插件覆盖）。
-- **接入结论（调研 zigoutbounds）**：VLESS/Trojan-over-WS **已完整实现**（`transport/ws.zig` 2245 行 + `vless.zig:1287`/`trojan.zig:267` ws_enabled + 配置映射已通），**缺的是测试用例而非协议**。**27.1 标准形态已落地**（4 处接线：functional×2 + bench-tcp/stream/sweep×6，全 PASS）；**27.2 CF 形态（后续）**：用 local-cf-dev 测 CF 兼容性（early data + 2 字节响应头 `[version,0]`），先实测 zigoutbounds vless-ws ↔ CF worker 直通性，必要时加 CF 兼容开关（非新协议）。
+- **插件形态（09-01 收尾；de4d628 双 worker 先于收尾落地）**：端口/凭证真相源 = `plugins/local-cf-dev/plugin.yaml` config 段——**VLESS worker 18787 + Trojan worker 18789 双常驻**（per-worker nodejs_compat），**Pages 18788 预留未接线**；协议覆盖边界只 VLESS/Trojan（s5http 不接入）。
+- **接入结论（zigoutbounds）**：VLESS/Trojan-over-WS 协议侧已实现（transport/ws.zig），**27.1 标准形态已落地**（functional×2 + bench-tcp/stream/sweep×6，全 PASS）；**27.2 CF 形态 early data（WS 0-RTT）验证仍开放** → 已移交 **zigbox 统一待办 zo 组**（09-07 第 8 次瘦身登记），见其 zo 表。
 
 ## 已结案/已完成（指针 → task_plan）
 
-- **§9 性能测试架构重构调研 → A/B/C/D 已完成（08-25）**：sing-box/xray 入站端口真相源 = `plugins/*/plugin.yaml`（sing-box 19 入站 2080~16812、xray 10 入站 2180~16909；xray socks:2180 无认证）；框架约束 = 4 层级 + per_suite_only + analyze_leak 显式。
+- **§9 性能测试架构重构调研 → A/B/C/D 已完成（08-25）**：sing-box/xray 入站端口**唯一真相源** = `plugins/*/plugin.yaml`（随新协议演进，勿固化计数；09-02 冻结快照——sing-box 22 协议 inbound 键 2080~16812，渲染 22 inbound 由 `test_plugin_ports.py:87` assert 固化，bc089e8「18→22」同步；xray 22 协议 inbound 键 2180~16931，含 16924-16931 xhttp 族 + 16930 reality + 16931 h3，3ccae14/53e3e11/f546de8 加入；xray socks:2180 无认证）；框架约束 = 4 层级 + per_suite_only + analyze_leak 显式。
 - **§10 bench-standard-outbound 诊断已结案（08-25）**：redirect cell = Linux 平台不支持（已加守卫）；重量出站 30s 挂起 = EOF 语义（read_by_cl 后全 PASS）；ss-xray 剔除（2022-blake3 握手不兼容，非修复）；**socks/socks-xray fd 耗尽 = zo `pollSessions()` 缺失（`481ed07` 修复，peak_fd=16）**。
 - **§6 MCP 长任务超时根因**：`json_response=True` 吞掉所有 progress 通知 → 客户端 60s 首字节超时；修复 = `json_response=False`（SSE）+ 每 10s 心跳（progress MUST 单调递增）。凡长任务 MCP 工具必须 SSE + 心跳。
 - **§7 per_suite_only**：zigoutbounds 25 套件全量 321.6s → `--level` 全量 SKIP + `--suite` 单跑（schema 无字段禁止 level 全量的根因）。
