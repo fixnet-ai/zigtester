@@ -349,6 +349,13 @@ class TestExecutor:
                 os.killpg(pgid, 0)  # 探测进程组是否仍有成员
             except ProcessLookupError:
                 return
+            except PermissionError:
+                # 进程组含更高权限成员（测试脚本 sudo 拉起的 root 子进程）：
+                # 无权探测但组仍存活——继续等循环，让末尾 SIGKILL 的已捕获
+                # 分支兜底（09-13 macvm sysproxy/tun-scenarios 收尾崩溃实锚：
+                # 此处未捕获使 zigtester 整体 crash，套件被误判 FAIL——
+                # 场景结果 11/11 全 PASS 却报 FAIL）
+                pass
             time.sleep(0.1)
         try:
             os.killpg(pgid, getattr(signal, "SIGKILL", 9))
