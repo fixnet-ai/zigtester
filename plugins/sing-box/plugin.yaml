@@ -7,7 +7,7 @@ description: "sing-box 进程管理 + REST API 热重载 — 统一管理代理�
 # plugins/plugin_ports.py 从这里派生,禁止各自硬编码。
 # 默认端口分配 — 项目可在 zigtester.yaml 中覆盖任意端口
 config:
-  api_listen: "127.0.0.1:9090"
+  api_listen: "127.0.0.1:19090"
   echo_host: "127.0.0.1"
   # 冗余引用：local-echo 插件 tcp_port 的副本，无消费方、无 __ECHO_PORT__ 占位符，
   # 仅供文档提示 local-echo 所在端口；改动以 plugins/local-echo/plugin.yaml 为准。
@@ -56,7 +56,7 @@ config:
 # 插件监听的端口列表 — 用于 zigtester 跨插件端口冲突检测
 # 与 xray-core 插件的同名端口 +100 错开
 ports:
-  - 9090      # sing-box Clash API
+  - 19090      # sing-box Clash API
   - 2080      # mixed
   - 5354      # dns (UDP)
   - 8388      # shadowsocks
@@ -89,7 +89,7 @@ lifecycle:
     timeout: 15
     ready_on:
       type: tcp
-      port: 9090
+      port: 19090
       host: "127.0.0.1"
   stop:
     timeout: 10

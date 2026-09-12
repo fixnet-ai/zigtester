@@ -237,7 +237,7 @@ def singbox_credential(key: str) -> str:
 
 
 def singbox_api_listen() -> str:
-    """sing-box Clash API 监听地址（config.api_listen，如 127.0.0.1:9090）。"""
+    """sing-box Clash API 监听地址（config.api_listen，如 127.0.0.1:19090）。"""
     return config_credential("sing-box", "api_listen")
 
 

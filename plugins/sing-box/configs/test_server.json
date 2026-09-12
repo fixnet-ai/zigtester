@@ -12,7 +12,7 @@
 // 使用方式:
 //   1. zigtester 插件自动启动（内部先渲染）
 //   2. 手动: cd plugins/sing-box && python3 singbox_ctl.py render --server-config configs/test_server.json --output configs/.rendered.json && sing-box run -c configs/.rendered.json
-//   3. API: curl http://127.0.0.1:9090/version 或 curl http://[::1]:9090/version
+//   3. API: curl http://127.0.0.1:19090/version 或 curl http://[::1]:19090/version
 //
 // 双栈: 所有 inbound 统一 listen "::" — Linux 和 macOS 均可同时接受 IPv4/IPv6 连接。
 //
@@ -66,7 +66,7 @@
 
   "experimental": {
     "clash_api": {
-      "external_controller": "127.0.0.1:9090",
+      "external_controller": "127.0.0.1:19090",
       "secret": ""
     }
   },

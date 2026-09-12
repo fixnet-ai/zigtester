@@ -6,7 +6,7 @@
 
 用法:
   # 作为 zigtester 插件启动（由 plugin.yaml 调用）
-  python3 singbox_ctl.py serve --api-listen 127.0.0.1:9090 --base-config configs/base.json
+  python3 singbox_ctl.py serve --api-listen 127.0.0.1:19090 --base-config configs/base.json
 
   # 作为库使用
   from plugins.sing_box import singbox_ctl
@@ -101,7 +101,7 @@ def _resolve_bin(name: str, candidates: list[str]) -> str:
 
 
 SINGBOX_BIN = _resolve_bin("sing-box", ["/opt/homebrew/bin/sing-box", "/usr/local/bin/sing-box"])
-DEFAULT_API = "127.0.0.1:9090"
+DEFAULT_API = "127.0.0.1:19090"
 DEFAULT_READY_TIMEOUT = 15
 IS_MACOS = platform.system() == "Darwin"
 IS_LINUX = platform.system() == "Linux"
@@ -313,7 +313,7 @@ class SingboxController:
     """sing-box 进程管理器 + REST API 客户端。
 
     使用方式:
-        ctl = SingboxController(api_addr="127.0.0.1:9090")
+        ctl = SingboxController(api_addr="127.0.0.1:19090")
         ctl.start("configs/base.json")        # 启动进程
         ctl.reload({...})                      # 热切换配置
         ctl.stop()                             # 停止进程
@@ -675,7 +675,7 @@ def _main() -> int:
 
     # serve — 渲染 + 启动并阻塞（zigtester 插件用）
     p_serve = sub.add_parser("serve", help="渲染配置并启动 sing-box 后阻塞（供 zigtester 插件调用）")
-    p_serve.add_argument("--api-listen", default=DEFAULT_API, help="API 监听地址，需与配置中一致 (默认: 127.0.0.1:9090)")
+    p_serve.add_argument("--api-listen", default=DEFAULT_API, help="API 监听地址，需与配置中一致 (默认: 127.0.0.1:19090)")
     p_serve.add_argument("--server-config", default="configs/test_server.json", help="sing-box 配置模板路径")
 
     # render — 仅渲染（调试 / host 侧预渲染）
