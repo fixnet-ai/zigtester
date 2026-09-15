@@ -64,7 +64,11 @@ def test_named_accessors_match_config():
     assert plugin_ports.echo_real_dns_port() == plugin_ports.config_port("local-echo", "real_dns_port")
     assert plugin_ports.echo_http_port() == plugin_ports.config_port("local-echo", "http_port")
     assert plugin_ports.echo_tls_port() == plugin_ports.config_port("local-echo", "tls_port")
-    assert plugin_ports.singbox_api_port() == 9090
+    # api_listen 是 "host:port" 字符串（非 config_port 可解析的纯端口键），
+    # 断言端口位确实从同一真相源派生，而非独立硬编码。
+    assert plugin_ports.singbox_api_port() == int(
+        plugin_ports.config_value("sing-box", "api_listen").rsplit(":", 1)[-1]
+    )
     assert plugin_ports.singbox_port("ss_port") == plugin_ports.config_port("sing-box", "ss_port")
     assert plugin_ports.xray_readiness_port() == plugin_ports.config_port("xray-core", "readiness_port")
     assert plugin_ports.masque_echo_port() == plugin_ports.config_port("masque-echo", "masque_port")
