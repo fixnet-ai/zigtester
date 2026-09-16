@@ -393,9 +393,21 @@ class Reporter:
             print(f"      {_DIM}res: n/a{_RESET}")
 
         # 失败/错误套件：打印失败用例行（始终显示，非 verbose 也展示关键信息）
+        failure_lines = extract_failure_lines(suite.stdout or "")
         if suite.status in ("FAIL", "ERROR") and suite.stdout:
-            for fl in extract_failure_lines(suite.stdout):
+            for fl in failure_lines:
                 print(f"      {_RED}{fl}{_RESET}")
+
+        # 无失败行可提取时的兜底取证（与 compact_markdown 的 #211 同源）：子进程早退
+        # （导入期崩溃 / 脚本守卫 / 未捕获异常）时 stdout 里没有任何 ✗/FAIL/ERROR:
+        # 标记，此前终端只剩一行 exit=N，根因完全不可见——2026-09-16 macvm
+        # scenarios 30ms exit=1（python3.9 求值 PEP 604 注解）因此查了十余轮，
+        # 而 MCP 路径的 compact_markdown 早已透传 stderr 尾部。有失败行则不重复刷屏。
+        if suite.status in ("FAIL", "ERROR") and not failure_lines:
+            for text, label in ((suite.stdout, "stdout"), (suite.stderr, "stderr")):
+                tail = [ln for ln in (text or "").strip().splitlines() if ln.strip()][-20:]
+                for tl in tail:
+                    print(f"      {_DIM}[{label}] {tl[:200]}{_RESET}")
 
         # 显示 setup/teardown 错误（始终显示，非 verbose 也展示关键信息）
         if suite.setup_error:
