@@ -14,26 +14,7 @@
 - zigtester 自身单测全绿：test_args_passthrough 6 + test_env_guard 15 + test_per_suite_only 4 +
   test_report_history 32 + test_runner_cleanup 2 + test_runner_env/test_plugin_ports/test_target_monitor。
 - 兄弟项目全部接入 zigtester（zigfoundation/zigbox/zigtun/zigproxy/zigdns/zigoutbounds + zigroute/zigunicfg）。
-- **zt-6/zt-7/zt-8/zt-9 全部闭环**（见「开放待办（历史）」）；**Phase 13 local-cf-dev 插件已收尾关闭（09-01，用户裁定）**，见下方专段。
-
-## ✅ 已完成：性能测试架构重构（A/B/C/D，2026-08-25）
-
-- 结论：新增第 4 层级 `performance-scenarios`（压测/疲劳/分流独立层）→ VALID_LEVELS/schema/list；
-  参数透传 + run 自动回归对比（MCP-only）+ history 固定报表；附带修复 `req_s` 关键词 / duration
-  归一化 / 基线三重过滤。过程与验收见 findings §9 + git log。
-
-## ✅ 已结案：bench-standard-outbound socks/socks-xray 连接泄漏（2026-08-25）
-
-- 结论：fd 耗尽根因 = zo `socks5.zig` 缺 `pollSessions()`（commit `481ed07` 修复，验证 peak_fd=16）；
-  EOF 语义定案 + ss-xray 剔除 + redirect 平台守卫等完整诊断见 findings §10 + git log。
-
-## Phase 13：local-cf-dev 插件（2026-08-28 → 09-01 已收尾关闭）
-
-- 结论：本地 CF Workers/Pages VLESS/Trojan-over-WS E2E 插件已落地并收尾（09-01 用户裁定关闭，
-  `local-cf-dev` 保留为 zo 专属插件）。设计/调研定论（ECH 本地不可测 / workerd 支持 connect() 等）
-  见 findings §11 + `plugins/local-cf-dev/README.md`；收尾裁决 + 依据见 zigbox `findings.md`
-  「Phase 13 local-cf-dev 收尾调研」段。
-- **遗留（非阻塞）已移交**：27.2 CF 形态 early data（WS 0-RTT）验证——客户端当前不发 early data、zo 侧未验证；该开放后续项已移交 **zigbox 统一待办 zo 组**登记（09-07 第 8 次瘦身），见其 zo 表，本仓不再保留开放项正文。
+- **zt-6/zt-7/zt-8/zt-9 全部闭环**（见「开放待办（历史）」）；**Phase 13 local-cf-dev 插件已收尾关闭（09-01，用户裁定）**，见「历史完成阶段总表」Phase 13 行。
 
 ## 开放待办（历史，均已闭环）
 
@@ -57,6 +38,9 @@
 | 10 | 测试流畅性改进 | failure_lines / flaky 检测 / 分组并行 / scenarios fast fail | git log |
 | 11 | flaky 根因修复 + 插件管道排空 | zigproxy 客户端超时缺陷 + zigdns FakeIP 期望 + PIPE drain | git log |
 | 12 | 插件 host 化 | 远程插件模式（host 优先级：plugin_ref > plugin.yaml > env > 127.0.0.1） | git log + plugin.py |
+| A/B/C/D | 性能测试架构重构（08-25） | 新增第 4 层级 performance-scenarios（压测/疲劳/分流独立层 → VALID_LEVELS/schema/list）+ 参数透传 + run 自动回归对比（MCP-only）+ history 固定报表；附带修复 req_s 关键词 / duration 归一化 / 基线三重过滤 | findings §9 + git log |
+| bench 结案 | bench-standard-outbound socks/socks-xray 连接泄漏（08-25） | fd 耗尽根因 = zo `socks5.zig` 缺 `pollSessions()`（481ed07 修复，peak_fd=16）；EOF 语义定案 + ss-xray 剔除 + redirect 平台守卫 | findings §10 + git log |
+| Phase 13 | local-cf-dev 插件（08-28 → 09-01 已收尾关闭） | 本地 CF Workers/Pages VLESS/Trojan-over-WS E2E 插件落地并收尾（09-01 用户裁定关闭，`local-cf-dev` 保留为 zo 专属插件；ECH 本地不可测 / workerd connect() 等定论见插件 README；收尾裁决见 zigbox findings「Phase 13 local-cf-dev 收尾调研」段）；遗留 27.2 CF early data 已移交 zigbox 统一待办 zo 组 | findings §11 + 插件 README + zigbox findings |
 
 ## 关键生效决策（最高优先级，勿改）
 
