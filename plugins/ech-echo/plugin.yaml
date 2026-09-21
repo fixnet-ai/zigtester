@@ -1,0 +1,34 @@
+name: ech-echo
+description: "ECH（RFC 9849）回环测试服务端（Go 1.24+ crypto/tls 原生 ECH，C 段夹逼一）：TLS1.3+ECH → 最小 trojan 服务端 → relay 客户端指定目标（local-echo :13333）。require-ech：ECHAccepted=false 断连，正腿回显成功即证明 ECH 端到端接受。启动时落两份 ECHConfigList b64（real 注册密钥 / stale 未注册密钥=反腿）供 test_engine.py 读"
+
+# 端口真相源（生态级）：本段是 ech-echo 全部命名端口的唯一权威。
+config:
+  host: "127.0.0.1"
+  ech_port: 13420         # TLS+ECH+trojan 监听（TCP）
+  # trojan 密码（test_engine.py build_config_json("trojan-ech") 同值；SHA224→hex 派生对齐）
+  password: "ech-echo-test"
+  # ECH public_name = outer SNI。注意：单标签名（localhost）会被 Go/BoringSSL 客户端
+  # 判非法 DNS 名而跳过该 ECHConfig —— 必须多标签（客户端 insecure，证书不约束此名）
+  public_name: "ech-echo.test"
+
+# 监听端口列表 — zigtester 端口冲突预检 + 每套件前环境自检
+ports:
+  - 13420
+
+build:
+  command: "go build -o ech-echo ."
+lifecycle:
+  start:
+    # 端口取自 config 段（zigtester 注入 PLUGIN_* 环境变量），${VAR:-默认} 兜底独立手动运行。
+    # 证书复用 local-echo 生态统一 localhost 证书（masque-echo 同款相对路径，cwd=插件目录）；
+    # 两份 ECHConfigList b64 落插件目录，test_engine.py 经 ZIGTESTER_PLUGINS_DIR 读取。
+    command: "exec ./ech-echo --host ${PLUGIN_HOST:-127.0.0.1} --port ${PLUGIN_ECH_PORT:-13420} --password ${PLUGIN_PASSWORD:-ech-echo-test} --public-name ${PLUGIN_PUBLIC_NAME:-ech-echo.test} --config-out ./ech_config.b64 --config-out-stale ./ech_config_stale.b64 --cert ../local-echo/certs/localhost.crt --key ../local-echo/certs/localhost.key"
+    timeout: 10
+    ready_on:
+      type: tcp
+      port: 13420
+      host: "127.0.0.1"
+  stop:
+    timeout: 5
+    kill:
+      - "ech-echo"
