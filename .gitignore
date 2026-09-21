@@ -46,3 +46,6 @@ plugins/masque-echo/masque-echo
 
 # Go plugin build artifacts (W4 masque-echo-mtls binary)
 plugins/masque-echo-mtls/masque-echo-mtls
+plugins/ech-echo/ech-echo
+plugins/ech-echo/ech_config.b64
+plugins/ech-echo/ech_config_stale.b64
