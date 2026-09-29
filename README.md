@@ -48,16 +48,16 @@ AI agent via MCP:
 
 What you see:
   "6/6 projects pass: zigfoundation (88 pass), zigtun (3 pass),
-   zigproxy (5 pass), zigdns (12 pass), zigoutbounds (15 pass), zigbox (23 pass)"
+   zigproxy (5 pass), zigdns (12 pass), zigoutbounds (15 pass), kiss-core (23 pass)"
 ```
 
 ### "Did my change hurt performance?"
 
 ```
-You: Did this change affect zigbox throughput?
+You: Did this change affect kiss-core throughput?
 
 AI agent via MCP:
-  → zigtester_history zigbox bench-throughput
+  → zigtester_history kiss-core bench-throughput
   → Loads last 10 runs, compares against baseline automatically
 
 What you see:

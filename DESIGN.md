@@ -6,7 +6,7 @@
 
 ## Context
 
-当前 8 个兄弟项目（zigfoundation、zigtun、zigproxy、zigdns、zigoutbounds、zigbox、zigroute、zigunicfg）各自拥有独立的测试体系，缺乏统一的测试配置格式、跨项目执行器、标准报告输出和历史回归检测。zigtester 目标是成为一个可被每个项目复用的 Python 自动测试框架，通过标准化配置文件自动扫描并执行单元测试、功能测试和性能测试（压力测试并入性能测试，作为其长时持续 + 资源趋势形态）。
+当前 8 个兄弟项目（zigfoundation、zigtun、zigproxy、zigdns、zigoutbounds、kiss-core、zigroute、zigunicfg）各自拥有独立的测试体系，缺乏统一的测试配置格式、跨项目执行器、标准报告输出和历史回归检测。zigtester 目标是成为一个可被每个项目复用的 Python 自动测试框架，通过标准化配置文件自动扫描并执行单元测试、功能测试和性能测试（压力测试并入性能测试，作为其长时持续 + 资源趋势形态）。
 
 ## 设计原则
 
@@ -91,7 +91,7 @@ zigtester/
 
 ```yaml
 # 项目标识
-project: zigbox
+project: kiss-core
 description: "sing-box 复刻 — 编排层"
 
 # 全局设置
@@ -177,7 +177,7 @@ run 选项：
 输出: {
   projects: [
     {name: "zigfoundation", path: "...", levels: ["unit"]},
-    {name: "zigbox", path: "...", levels: ["unit","functional","performance"]},
+    {name: "kiss-core", path: "...", levels: ["unit","functional","performance"]},
   ]
 }
 ```
@@ -186,9 +186,9 @@ run 选项：
 列出项目的测试套件。
 
 ```
-输入: {project: "zigbox"}
+输入: {project: "kiss-core"}
 输出: {
-  project: "zigbox",
+  project: "kiss-core",
   levels: {
     unit: [{name: "all-tests", command: "zig build test", parser: "zig_test"}],
     functional: [{name: "protocols", command: "python3 tests/test_protocols.py", sudo: true}],
@@ -222,9 +222,9 @@ run 选项：
 查看性能历史，自动检测回归。
 
 ```
-输入: {project: "zigbox", suite: "bench-socks5", limit: 10}
+输入: {project: "kiss-core", suite: "bench-socks5", limit: 10}
 输出: {
-  project: "zigbox",
+  project: "kiss-core",
   suite: "bench-socks5",
   runs: [
     {timestamp: "2026-08-07T10:00:00Z", throughput: 520, p99_ms: 85},
@@ -268,7 +268,7 @@ run 选项：
 
 ### 4. reporter.py — 输出
 
-复用 zigbox `tests/lib/report.py` 的 `TestResult`/`TestSuite` 模式并增强：
+复用 kiss-core `tests/lib/report.py` 的 `TestResult`/`TestSuite` 模式并增强：
 - `TestResult`: name, status(PASS/FAIL/SKIP/ERROR), duration_ms, message, metrics
 - `TestSuite`: 聚合多个 TestResult，统计通过/失败/跳过
 - `WorkspaceReport`: 跨项目聚合
@@ -533,9 +533,9 @@ levels:
     - {name: "bench-ss2022", command: "python3 tests/protocol-tester/benchmark.py ss2022 -c 4 -n 100"}
 ```
 
-### zigbox
+### kiss-core
 ```yaml
-project: zigbox
+project: kiss-core
 description: "sing-box 复刻 — 编排层"
 levels:
   unit:
@@ -554,8 +554,8 @@ levels:
 |--------|---------|------|
 | `zig_test` | `zig build test` | 解析 `X/Y passed; Z skipped`，提取通过/失败数 |
 | `line_count` | 任意命令 | exit 0 → PASS，输出行数作为指标 |
-| `test_protocols` | zigbox test_protocols.py | 解析 `总计 X \| 通过 Y \| 失败 Z` |
-| `bench` | zigbox test_bench.py | 解析吞吐/延迟分位/传输速率 |
+| `test_protocols` | kiss-core test_protocols.py | 解析 `总计 X \| 通过 Y \| 失败 Z` |
+| `bench` | kiss-core test_bench.py | 解析吞吐/延迟分位/传输速率 |
 | `custom` | 用户定义 | 用 regex patterns 提取指标 |
 
 ## 设计依据 — 复用现有模式
@@ -564,15 +564,15 @@ zigtester 不是凭空设计，而是从 8 个兄弟项目的现有测试实践�
 
 | 模式 | 来源 | zigtester 如何复用 |
 |------|------|-------------------|
-| `TestResult` / `TestSuite` 类 | zigbox `tests/lib/report.py` | 直接复用其四状态模型 (PASS/FAIL/SKIP/ERROR) + 三路输出 |
-| `ZigboxProcess` 生命周期 | zigbox `tests/lib/zigbox.py` | 抽象为 `TestExecutor`，支持任意子进程的 start/stop/超时/日志 |
-| 4 层测试模型 | zigbox `tests/SKILL.md` | 标准化为 `unit/functional/performance/performance-scenarios`（压测/疲劳/长时套件独立层，长时套件 `bench-long-*` 经 `per_suite_only` 隔离） |
+| `TestResult` / `TestSuite` 类 | kiss-core `tests/lib/report.py` | 直接复用其四状态模型 (PASS/FAIL/SKIP/ERROR) + 三路输出 |
+| `KisscoreProcess` 生命周期 | kiss-core `tests/lib/kisscore.py` | 抽象为 `TestExecutor`，支持任意子进程的 start/stop/超时/日志 |
+| 4 层测试模型 | kiss-core `tests/SKILL.md` | 标准化为 `unit/functional/performance/performance-scenarios`（压测/疲劳/长时套件独立层，长时套件 `bench-long-*` 经 `per_suite_only` 隔离） |
 | crypto-only → E2E 管道 | zigoutbounds `test_protocols.py` | 通过 `depends_on` 实现阶段间依赖 |
 | `benchmark.py` 指标提取 | zigoutbounds | 抽象为 `MetricExtractor` + 正则 pattern |
-| `zigbox.stat` 健康检查 | zigbox `test_all.py` | 抽象为 `ResourceMonitor`（psutil 后端） |
+| `kisscore.stat` 健康检查 | kiss-core `test_all.py` | 抽象为 `ResourceMonitor`（psutil 后端） |
 | `zig build test` 输出 | 全部 8 个项目 | 内置 `zig_test` 解析器 |
-| Markdown 报表 | zigbox `report.py::print_markdown()` | 统一 Markdown 表格格式 |
-| SKILL.md 测试文档 | zigbox `.claude/skills/tests/` | zigtester 自带轻量 `SKILL.md` |
+| Markdown 报表 | kiss-core `report.py::print_markdown()` | 统一 Markdown 表格格式 |
+| SKILL.md 测试文档 | kiss-core `.claude/skills/tests/` | zigtester 自带轻量 `SKILL.md` |
 
 ## SKILL.md 规范
 
@@ -581,7 +581,7 @@ zigtester 自带轻量 SKILL.md（~50 行），内容仅包含：
 - MCP 工具列表和用途（指向 MCP server，不写具体用法）
 - CLI 快速参考（2-3 个最常用命令）
 - 配置文件名约定（`zigtester.yaml`）
-- 与 zigbox tests skill 的边界
+- 与 kiss-core tests skill 的边界
 
 ## MCP Server 实现方案
 
@@ -640,7 +640,7 @@ def main():
 | 阶段 | 内容 | 状态 |
 |------|------|------|
 | **Phase 1** | 设计文档 + JSON Schema + 接口规范 | ✅ 已完成 |
-| **Phase 2** | Python 包骨架 + 全部 9 个核心模块 + zigfoundation/zigbox zigtester.yaml | ✅ 已完成 |
+| **Phase 2** | Python 包骨架 + 全部 9 个核心模块 + zigfoundation/kiss-core zigtester.yaml | ✅ 已完成 |
 | **Phase 3** | 其余 4 项目 zigtester.yaml (zigtun/zigproxy/zigdns/zigoutbounds) | 🔲 待开始 |
 | **Phase 4** | CI 集成 + GitHub Actions + 通知 | 🔲 待开始 |
 

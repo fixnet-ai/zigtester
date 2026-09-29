@@ -16,7 +16,7 @@ fixnet/
   zigproxy/       ← 代理协议库
   zigdns/         ← DNS 组件库
   zigoutbounds/   ← 重量出站协议
-  zigbox/         ← 编排层 + 轻量出站
+  kiss-core/         ← 编排层 + 轻量出站
   zigtester/      ← 自动测试框架 (本项目) — 元框架，包装以上所有项目的测试
 ```
 
@@ -150,8 +150,8 @@ ZIGTESTER_ROOT=~/works/2025/fixnet python -m zigtester.server &
 |--------|---------|------|
 | `zig_test` | `zig build test` | 解析 `X/Y passed; Z skipped` 及 `X passed; Y skipped; Z failed.`；多 step 编译错误 → `build_failure`（不误报为断言失败，09-02 950e8a1） |
 | `line_count` | 任意命令 | exit 0 → PASS，输出行数作为指标 |
-| `test_protocols` | zigbox test_protocols.py | 解析 `总计 X \| 通过 Y \| 失败 Z` |
-| `bench` | zigbox test_bench.py | 解析吞吐/延迟分位/传输速率 |
+| `test_protocols` | kiss-core test_protocols.py | 解析 `总计 X \| 通过 Y \| 失败 Z` |
+| `bench` | kiss-core test_bench.py | 解析吞吐/延迟分位/传输速率 |
 | `custom` | 用户定义 | 用 regex patterns 提取指标 |
 
 ## 配置文件格式
@@ -231,9 +231,9 @@ local-echo 端口契约（各项目测试脚本共享，禁止项目脚本自行
 |------|------|------|
 | 13333 | TCP+UDP | 协议自适应 echo（SOCKS5/CONNECT/HTTP）+ UDP raw echo |
 | 5533 | UDP | DNS echo（FakeIP 模式） |
-| 15353 | UDP | DNS echo（real-map 模式，zigbox 矩阵） |
+| 15353 | UDP | DNS echo（real-map 模式，kiss-core 矩阵） |
 | 13335 / 13336 | TCP / UDP | H2 / H3 echo（请求体回显） |
-| 18080 / 18443 | TCP | 额外 HTTP / TLS 回显（zigbox 矩阵 curl 目标） |
+| 18080 / 18443 | TCP | 额外 HTTP / TLS 回显（kiss-core 矩阵 curl 目标） |
 | 13337 | TCP | bench 纯字节 echo（短连接压测，10ms idle 主动关） |
 | 13338 | TCP | stream 纯字节 echo（长连接压测，无 idle——N:1 轮转空隙会误杀长连接） |
 
@@ -243,7 +243,7 @@ local-echo 端口契约（各项目测试脚本共享，禁止项目脚本自行
 
 ## 参考代码
 
-- `../kiss-core/src/zigtester/reporter.py` — TestResult/TestSuite 四状态模型（PASS/FAIL/SKIP/ERROR）（原 `../zigbox/tests/lib/report.py`，已在 `56b4511` 对齐 zigtester 框架时收编进本仓）
-- `../kiss-core/tests/lib/zigbox.py` — 子进程生命周期管理（抽象为 TestExecutor）
-- ~~`../zigbox/tests/SKILL.md`~~ — 3 层测试模型（unit/functional/performance）：该文件已于 `dbac4b0` 删除（**无继任者**），层级定义现以 `../kiss-core/zigtester.yaml` 为准
+- `../kiss-core/src/zigtester/reporter.py` — TestResult/TestSuite 四状态模型（PASS/FAIL/SKIP/ERROR）（原 `../kiss-core/tests/lib/report.py`，已在 `56b4511` 对齐 zigtester 框架时收编进本仓）
+- `../kiss-core/tests/lib/kisscore.py` — 子进程生命周期管理（抽象为 TestExecutor）
+- ~~`../kiss-core/tests/SKILL.md`~~ — 3 层测试模型（unit/functional/performance）：该文件已于 `dbac4b0` 删除（**无继任者**），层级定义现以 `../kiss-core/zigtester.yaml` 为准
 - `../zigoutbounds/tests/protocol-tester/` — 依赖管道（crypto-only → E2E）+ benchmark 编排

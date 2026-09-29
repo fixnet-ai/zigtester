@@ -193,7 +193,7 @@ class TestExecutor:
                 self._execute_teardown(suite.teardown, work_dir, result)
 
             # ── Phase 6: 兜底清理 test command 进程树（zt-6）──
-            # 测试脚本可能未清理其 spawn 的后代（如 long 套件残留 zigbox 占用
+            # 测试脚本可能未清理其 spawn 的后代（如 long 套件残留 kisscore 占用
             # 12080 → 下一套件环境自愈假失败）。进程组清理覆盖脱离父进程的孤儿；
             # 放 teardown 之后，不干扰套件自带的清理钩子。
             if test_proc is not None:
@@ -235,7 +235,7 @@ class TestExecutor:
         """启动子进程。"""
         if sudo:
             # ⚠ sudo 默认 env_reset 清空调用者环境变量——套件依赖的 host 化变量
-            # （ZIGBOX_ECHO_HOST/ZIGTESTER_PLUGIN_HOST 经 merged_env 传入）会被
+            # （KISSCORE_ECHO_HOST/ZIGTESTER_PLUGIN_HOST 经 merged_env 传入）会被
             # 清空 → ECHO_HOST 回退 127.0.0.1 探测本机端口失败（tun-scenarios
             # macvm 实证，1.6s exit=1）。加 -E 保留调用者环境；PATH 仍受
             # sudoers secure_path 约束（与裸 sudo 一致，无 PATH 回归）。
@@ -252,7 +252,7 @@ class TestExecutor:
             cwd=work_dir,
             # zt-6：独立进程组（组 id = 命令进程 pid）。test command 与其全部
             # 后代同属一组 → 套件结束后 killpg 兜底清理残留（含脱离父进程的
-            # 孤儿被测进程，如 long 套件残留的 zigbox listen 12080）。
+            # 孤儿被测进程，如 long 套件残留的 kisscore listen 12080）。
             start_new_session=True,
         )
 
@@ -925,7 +925,7 @@ def _is_sudo_failure(stderr: str) -> bool:
 def _wait_tcp_ready(host: str, port: int, timeout: int, interval: float) -> bool:
     """轮询 TCP 端口直到可连接或超时。
 
-    等价于 zigbox tests/lib/config.py 的 wait_for_port()。
+    等价于 kisscore tests/lib/config.py 的 wait_for_port()。
     """
     import socket
     deadline = time.time() + timeout

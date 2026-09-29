@@ -12,8 +12,8 @@ config:
   # 服务器证书复用 local-echo（与 masque-echo 相同，保证 pin 正向用同一 SPKI）
   https_cert_path: "../local-echo/certs/localhost.crt"
   https_key_path: "../local-echo/certs/localhost.key"
-  # mTLS 客户端 CA 锚：空 DN 自签客户端证书（与 zigbox GenerateCert 语义一致，
-  # 公钥 = zigbox private-key 对应公钥 → Go 校验自洽链通过）。certs/client.crt 由
+  # mTLS 客户端 CA 锚：空 DN 自签客户端证书（与 kisscore GenerateCert 语义一致，
+  # 公钥 = kisscore private-key 对应公钥 → Go 校验自洽链通过）。certs/client.crt 由
   # zigoutbounds/tests/tools/masque-echo/gen_certs.sh 生成（一对密钥，勿单独换）。
   client_ca: "certs/client.crt"
 

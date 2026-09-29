@@ -24,7 +24,7 @@
 //     ↑ direct outbound
 //   sing-box (本配置 — 18 协议 inbound，双栈 :: 同时支持 IPv4/IPv6)
 //     ↑ 各协议
-//   测试客户端 (zigbox/zigoutbounds ProtocolClient)
+//   测试客户端 (kiss-core/zigoutbounds ProtocolClient)
 //
 // 凭证（仅限本机开发测试，无生产价值）— 权威在 plugins/sing-box/plugin.yaml config:
 //   SS2022 PSK / Trojan 密码 / Hysteria2 密码 / VMess+VLESS UUID / TUIC / Salamander /

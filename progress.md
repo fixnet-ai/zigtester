@@ -8,15 +8,15 @@
 
 - **代码自 09-02 冻结（95d36b2 = HEAD）**：本仓 tag v0.34/v0.35/v0.36 均指该 commit；生态 tag 已推进至 v0.37.0（09-06，同 commit，期间生态开发对 zigtester 无代码影响）。
 - 分支 `main`。全部 Phase 1-12 完成（2026-08-07 → 08-21）+ A/B/C/D 性能架构重构完成（08-25）。
-- 兄弟项目全部接入：zigfoundation / zigbox / zigtun / zigproxy / zigdns / zigoutbounds + zigroute / zigunicfg。
+- 兄弟项目全部接入：zigfoundation / kiss-core / zigtun / zigproxy / zigdns / zigoutbounds + zigroute / zigunicfg。
 - zigtester 自身单测全绿：test_args_passthrough 6 + test_env_guard 15 + test_per_suite_only 4 +
   test_report_history 32 + test_runner_cleanup 2 + test_runner_env + test_plugin_ports + test_target_monitor。
-- **zt-6/zt-7/zt-8/zt-9 全部闭环**（进程组兜底 / Windows taskkill 分支 / FAIL stdout 尾部透传 / launchd Interactive；结论与锚点见 findings 定论表 zt-6..zt-9 行 + **kiss** 统一待办 zigtester 表）。**Phase 13 local-cf-dev 插件已收尾关闭（09-01，用户裁定）**——zo 接入闭环、zigbox 裁决不接（纯编排层冗余）；插件保留为 zo 专属。见 task_plan「Phase 13」专段。
+- **zt-6/zt-7/zt-8/zt-9 全部闭环**（进程组兜底 / Windows taskkill 分支 / FAIL stdout 尾部透传 / launchd Interactive；结论与锚点见 findings 定论表 zt-6..zt-9 行 + **kiss** 统一待办 zigtester 表）。**Phase 13 local-cf-dev 插件已收尾关闭（09-01，用户裁定）**——zo 接入闭环、kiss-core 裁决不接（纯编排层冗余）；插件保留为 zo 专属。见 task_plan「Phase 13」专段。
 
 ## 近期定论（2026-08-18 → 09-01，指针 → findings 定论位置表 / task_plan，细节不重复）
 
 - **09-01 zt-9 launchd Interactive**：`autostart.py` ProcessType Background→Interactive 后 zigoutbounds unit **435/435 PASS ×2**（11s/16s，此前 1m + 编译被杀 806M）。教训 = MCP/测试服务进程类型须匹配工作负载（Background 隐含 jetsam 上限）。→ findings 定论表 zt-9 行。
-- **08-31 zt-6 进程组兜底**：`start_new_session` + finally `_kill_test_proc_tree`（SIGTERM→2s→SIGKILL）；zigbox test_bench 侧治本；long 套件后 **12080 FREE**。→ findings 定论表 zt-6 行。
+- **08-31 zt-6 进程组兜底**：`start_new_session` + finally `_kill_test_proc_tree`（SIGTERM→2s→SIGKILL）；kiss-core test_bench 侧治本；long 套件后 **12080 FREE**。→ findings 定论表 zt-6 行。
 - **08-28 local-cf-dev（Phase 13）**：wrangler dev 三层验证全绿；workerd 已缓存 npx 首跑无需网络；localhost 证书系统信任双向 200。→ findings §11 指针 + local-cf-dev README。
 - **08-26 回归基线三重过滤**：短 duration / >7 天陈旧 / 延迟 <1ms 噪声 → `_is_short_duration`/`_is_stale`/`_is_latency_metric`；**test_report_history 27→32**，zigdns 误报清零。→ findings 定论表三重过滤行。
 - **08-25 回归 duration 归一化**：总量按 duration_s 归一为每秒速率（`_DURATION_SCALED_METRICS`），hy2 -40% 误报消除；**test_report_history 24→27**。→ findings 定论表行。

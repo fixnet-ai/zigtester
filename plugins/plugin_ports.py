@@ -2,7 +2,7 @@
 
 背景：端口配置曾分散在 ≥7 处同步点（各项目 tests/config.py、zigoutbounds
 tests/lib、插件 configs/test_server.json、文档表等），历史出过 2080 冲突事故
-（某 config.py 注释实证：curl 连到 sing-box 而非被测 zigbox）。
+（某 config.py 注释实证：curl 连到 sing-box 而非被测 kisscore）。
 
 本模块是「唯一派生实现」：所有消费方（跨仓 config.py、插件 ctl 脚本、各项目
 tests 库）只从 plugin.yaml 读取端口/凭证，禁止各自硬编码。plugin.yaml 是唯一

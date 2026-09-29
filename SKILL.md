@@ -42,14 +42,14 @@ zigtester scan --dir ~/works/2025/fixnet
 # 运行 zigfoundation 单元测试
 zigtester run zigfoundation --level unit
 
-# 运行 zigbox 所有层级
-zigtester run zigbox
+# 运行 kiss-core 所有层级
+zigtester run kiss-core
 
 # 运行跨项目全部测试
 zigtester run --all --level unit
 
 # 查看历史
-zigtester history zigbox all-tests
+zigtester history kiss-core all-tests
 
 # 生成配置模板
 zigtester init --dir ~/works/2025/fixnet/myproject --project myproject

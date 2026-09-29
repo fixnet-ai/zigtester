@@ -1,6 +1,6 @@
 """输出格式化 — 终端 ANSI 彩色 / Markdown 表格 / JSON。
 
-复用 zigbox tests/lib/report.py 的 TestResult/TestSuite 模式并增强。
+复用 kisscore tests/lib/report.py 的 TestResult/TestSuite 模式并增强。
 """
 
 from __future__ import annotations
@@ -87,7 +87,7 @@ def performance_group(suite_name: str) -> str:
 
     bench-tcp-direct / bench-stream-direct / bench-long-direct /
     bench-tcp-sweep-direct → "direct"（同协议多模式合并一组）；
-    zigbox 短名 bench-socks5 / bench-long → 自身 token；非 bench 套件 → 自身名。
+    kisscore 短名 bench-socks5 / bench-long → 自身 token；非 bench 套件 → 自身名。
     """
     m = _GROUP_RE.match(suite_name)
     return m.group(1) if m else suite_name
@@ -97,7 +97,7 @@ def mode_of(suite_name: str) -> str:
     """提取 performance 套件的模式前缀（展示消歧）。
 
     bench-tcp-* → "tcp"、bench-stream-* → "stream"、bench-long-* → "long"、
-    bench-tcp-sweep-* → "sweep"；其余（zigbox 短名/非 bench）→ ""。
+    bench-tcp-sweep-* → "sweep"；其余（kisscore 短名/非 bench）→ ""。
     """
     m = _MODE_RE.match(suite_name)
     if not m:
@@ -697,7 +697,7 @@ class Reporter:
                             lines.append(f"    {rl}")
                         lines.append("    ```")
                 # stdout 尾部透传（#211 失败取证）：test 脚本详细输出含失败
-                # 场景行 + zigbox 日志摘要，此前被吞掉导致失败无法定位
+                # 场景行 + kisscore 日志摘要，此前被吞掉导致失败无法定位
                 # （如 macvm VT17 timed out 仅见 message 一行）。失败行通常在
                 # 脚本尾部（fail-fast 中止前），截最后 20 行非空行，单行截断
                 # 防超长（长 JSON 转储/日志行）。

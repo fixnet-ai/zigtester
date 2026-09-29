@@ -1,5 +1,5 @@
 name: local-cf-dev
-description: "本地部署 CF Workers 代理（yonggekkk/Cloudflare-vless-trojan 的 VLESS/Trojan-over-WS worker）— 经 wrangler dev（workerd 运行时）离线跑 zigbox/zigoutbounds 的 VLESS/Trojan+WS(+TLS) 协议 E2E。ECH 本地不可测（workerd 不做 ECH 终止，ECH 是 CF 边缘能力，见 README）"
+description: "本地部署 CF Workers 代理（yonggekkk/Cloudflare-vless-trojan 的 VLESS/Trojan-over-WS worker）— 经 wrangler dev（workerd 运行时）离线跑 kiss-core/zigoutbounds 的 VLESS/Trojan+WS(+TLS) 协议 E2E。ECH 本地不可测（workerd 不做 ECH 终止，ECH 是 CF 边缘能力，见 README）"
 
 # 端口/凭证真相源（生态级）: 本段是 local-cf-dev 插件全部端口与凭证的唯一权威。
 # 各项目 tests/config.py 经 plugins/plugin_ports.py 从这里派生,禁止各自硬编码。

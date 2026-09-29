@@ -68,4 +68,4 @@
 - **§6 MCP 长任务超时根因**：`json_response=True` 吞掉所有 progress 通知 → 客户端 60s 首字节超时；修复 = `json_response=False`（SSE）+ 每 10s 心跳（progress MUST 单调递增）。凡长任务 MCP 工具必须 SSE + 心跳。
 - **§7 per_suite_only**：zigoutbounds 25 套件全量 321.6s → `--level` 全量 SKIP + `--suite` 单跑（schema 无字段禁止 level 全量的根因）。
 - **§8 target 字段**：只采目标被测程序，未匹配跳过采样；**sudo 双重坑**（命令自带 sudo → 命令进程 = sudo 进程 rss≈0）。
-- **zt-6/zt-7/zt-8/zt-9 已闭环**（详见 task_plan「开放待办」）：zt-6 进程组兜底 + zigbox 治本；zt-7 Windows taskkill 分支；zt-8 stdout 尾部透传；zt-9 launchd ProcessType Interactive。
+- **zt-6/zt-7/zt-8/zt-9 已闭环**（详见 task_plan「开放待办」）：zt-6 进程组兜底 + kiss-core 治本；zt-7 Windows taskkill 分支；zt-8 stdout 尾部透传；zt-9 launchd ProcessType Interactive。

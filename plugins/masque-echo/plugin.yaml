@@ -9,7 +9,7 @@ config:
   host: "127.0.0.1"        # 监听/模板 host（CONNECT-IP :authority 严格匹配，必须 = 客户端连接 host）。
                            # 默认回环 = 同机测试（vtun/masque 套件）；host 化场景（VM 经网关 IP 连 host
                            # 插件）须设 PLUGIN_HOST=<网关 IP> 覆盖（不能像 local-echo 绑 0.0.0.0——模板
-                           # host 会变 0.0.0.0，:authority 仍不匹配 → 400）。见 zigbox
+                           # host 会变 0.0.0.0，:authority 仍不匹配 → 400）。见 kisscore
                            # tests/tools/masque_echo_host.sh 固化启停。
   masque_port: 13400       # CONNECT-IP QUIC 监听（UDP）
   ready_port: 13401        # TCP readiness 探针（UDP 端口无法 TCP 探测，独立探针）

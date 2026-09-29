@@ -60,7 +60,7 @@ description: >
 | `build.zig` 中有 `tun`/`lwip`/`utun` 引用 | **TUN 设备项目** | zigtun |
 | `build.zig` 中有 `xev` 引用 + 代理协议逻辑 | **代理协议项目** | zigproxy, zigoutbounds |
 | `build.zig` 中有 `xev` 引用 + DNS 逻辑 | **DNS 组件项目** | zigdns |
-| `build.zig` 中有 `xev` + 配置解析 + 多模块编排 | **编排层项目** | zigbox |
+| `build.zig` 中有 `xev` + 配置解析 + 多模块编排 | **编排层项目** | kiss-core |
 
 4. **对 Python 项目**：
 
@@ -214,7 +214,7 @@ levels:
       parser: bench
 ```
 
-#### 变体 D: 编排层项目（如 zigbox）
+#### 变体 D: 编排层项目（如 kiss-core）
 
 ```yaml
 project: {name}
@@ -341,7 +341,7 @@ else:
 | **zigproxy** | 变体 B + 协议检测测试 |
 | **zigdns** | 变体 B + DNS 测试 |
 | **zigoutbounds** | 变体 C + crypto-only → E2E 管道 + depends_on |
-| **zigbox** | 变体 D + 3 层级 5 套件 |
+| **kiss-core** | 变体 D + 3 层级 5 套件 |
 | **zigtester** (自身) | 变体 E + Python pytest |
 
 ---
@@ -364,4 +364,4 @@ else:
 - 编码规范: `zigtester/CLAUDE.md`
 - zigtester CLI 实现: `zigtester/src/cli.py` (cmd_init)
 - 配置模板生成: `zigtester/src/config.py` (generate_template)
-- 已有配置示例: `zigfoundation/zigtester.yaml`, `zigbox/zigtester.yaml`
+- 已有配置示例: `zigfoundation/zigtester.yaml`, `kiss-core/zigtester.yaml`

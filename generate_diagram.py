@@ -36,7 +36,7 @@ ax.text(1.2, 7.8, 'Projects & Tests', fontsize=11, weight='bold', color=color_te
 projects = [
     ('zigfoundation', 0.5, 6.8),
     ('zigoutbounds', 0.5, 6.2),
-    ('zigbox', 2.5, 6.8),
+    ('kiss-core', 2.5, 6.8),
     ('zigtun', 2.5, 6.2),
 ]
 

@@ -2,11 +2,11 @@
 
 本地部署 Cloudflare Workers 代理（[yonggekkk/Cloudflare-vless-trojan](https://github.com/yonggekkk/Cloudflare-vless-trojan)
 的 VLESS/Trojan-over-WebSocket worker），经 `wrangler dev`（workerd 运行时）在**离线闭环**内跑
-zigbox / zigoutbounds 的 VLESS / Trojan + WS（+TLS）协议 E2E。
+kiss-core / zigoutbounds 的 VLESS / Trojan + WS（+TLS）协议 E2E。
 
 ## 为什么需要它
 
-zigbox / zigoutbounds 已有 vless / trojan 出站客户端，且已对 sing-box / xray 的 vless/trojan
+kiss-core / zigoutbounds 已有 vless / trojan 出站客户端，且已对 sing-box / xray 的 vless/trojan
 入站做过 E2E（`bench-tcp-vless` / `bench-tcp-trojan` 等）。但 CF Workers 代理是一类**真实生产形态**
 （VLESS/Trojan 跑在 `WebSocket` 之上、由 workerd 解析协议头），其数据路径与 sing-box/xray 的
 原生入站不同。本插件把这种形态搬回本机，离线测通 zig* 客户端 ↔ CF worker 的协议互通。
@@ -14,7 +14,7 @@ zigbox / zigoutbounds 已有 vless / trojan 出站客户端，且已对 sing-box
 ## 离线数据路径（闭环）
 
 ```
-zigbox vless+ws 客户端
+kiss-core vless+ws 客户端
   └─> 127.0.0.1:18787（wrangler dev / workerd，本地）
         worker 解析 VLESS 头（version+uuid+command+port+atyp+addr）
         └─> cloudflare:sockets connect({hostname:"localhost"})

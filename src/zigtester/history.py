@@ -198,7 +198,7 @@ def _resolve_project_id(db: sqlite3.Connection, name_or_id: str) -> str | None:
         return row["id"]
     # 按名称查找 — 同名多 id 场景（yaml 引入显式 id 前，旧确定性 UUID 与新 id 并存）：
     # 取最近有 runs 活跃的 id；fetchone 无序会返回旧 id，history 显示陈旧数据
-    # （2026-08-18 实证：zigbox 新记录在新 id 下，history 命令却显示 08-09 旧基线）
+    # （2026-08-18 实证：kisscore 新记录在新 id 下，history 命令却显示 08-09 旧基线）
     row = db.execute(
         """SELECT r.project_id AS id FROM runs r
            JOIN projects p ON r.project_id = p.id

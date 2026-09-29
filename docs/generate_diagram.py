@@ -45,7 +45,7 @@ def create_diagram():
     projects = [
         ("zigfoundation", 50, 220),
         ("zigoutbounds", 50, 290),
-        ("zigbox", 250, 220),
+        ("kiss-core", 250, 220),
         ("zigtun", 250, 290),
     ]
     

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """zt-6：test command 进程树兜底清理单元测试。
 
-背景：long 套件（bench-long-*，62-120s）结束后被测 zigbox 残留 listen 12080
+背景：long 套件（bench-long-*，62-120s）结束后被测 kisscore 残留 listen 12080
 → 下一套件环境自愈假失败（SIGTERM local-echo 连锁）。修复 = test command
 启动时独立进程组（start_new_session），套件结束后 killpg 兜底清理（覆盖
 脱离父进程的孤儿后代）。
@@ -36,10 +36,10 @@ def _alive(pid: int) -> bool:
 
 
 def test_executor_kills_spawned_orphan_after_suite():
-    """test command 留下的孤儿子进程（zigbox 残留场景）在套件结束后被清理。
+    """test command 留下的孤儿子进程（kisscore 残留场景）在套件结束后被清理。
 
     test command 是 python -c 包装，spawn 一个 sleep 30 后台子进程写 pid 文件
-    后立即退出（模拟 test_bench.py 退出后残留 zigbox 的孤儿场景）。套件结束后
+    后立即退出（模拟 test_bench.py 退出后残留 kisscore 的孤儿场景）。套件结束后
     该子进程必须已被进程组 killpg 清理。
     """
     tmp = tempfile.mktemp(suffix=".zt6.pid")

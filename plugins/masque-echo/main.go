@@ -156,7 +156,7 @@ func main() {
 //     Go 标准 RequireAndVerifyClientCert 无法把它验证为"由 CA 锚签发"（自签 leaf 直接
 //     按根处理 → unknown authority，W4 实测 openssl error 18 / Go unknown authority）。
 //   - 所以服务器侧要求证书但**跳过链校验**，改为 VerifyPeerCertificate **比对客户端证书
-//     ECDSA 公钥与锚（client.crt）公钥**——zigbox 用配置 private-key 生成证书时公钥
+//     ECDSA 公钥与锚（client.crt）公钥**——kisscore 用配置 private-key 生成证书时公钥
 //     与 client.crt 一致（同密钥对），公钥匹配即放行（对齐 usque 服务端公钥比对）。
 //
 // clientCAPath 为空时保持原行为（不要求客户端证书）。

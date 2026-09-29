@@ -8,7 +8,7 @@ from typing import Any
 from .config import MetricDef, Threshold
 
 
-# zigbox test_bench.py + zigoutbounds test_engine.py 的 bench 指标提取正则。
+# kisscore test_bench.py + zigoutbounds test_engine.py 的 bench 指标提取正则。
 # 单档用 re.search 对全 stdout 取首匹配;多档(并发扫描)按行提取存 {key}_c{N}。
 _BENCH_PATTERNS: list[tuple[str, str]] = [
     (r"吞吐:\s*([0-9.]+)\s*req/s", "throughput_reqs_per_sec"),
@@ -20,7 +20,7 @@ _BENCH_PATTERNS: list[tuple[str, str]] = [
     (r"p95:\s+([0-9.]+)(?!\s*ms)", "latency_p95_raw"),
     (r"p99:\s+([0-9.]+)(?!\s*ms)", "latency_p99_raw"),
     (r"错误:\s*([0-9]+)", "error_count"),
-    # zigbox 并发扫描机器行逐档 CPU%（--sweep-concurrency，#88 诊断"各协议 CPU
+    # kisscore 并发扫描机器行逐档 CPU%（--sweep-concurrency，#88 诊断"各协议 CPU
     # 是否相同"；matrix 行格式不含 "CPU:" 不会误命中，单档套件不打印该字段）
     (r"CPU:\s*([0-9.]+)%", "cpu_pct"),
     (r"成功:\s*([0-9]+)", "success_count"),
@@ -39,7 +39,7 @@ _BENCH_PATTERNS: list[tuple[str, str]] = [
     (r"OK_REQ=([0-9]+)", "success_count"),
     (r"ERRORS=([0-9]+)", "error_count"),
     (r"ERROR_RATE=([0-9.]+)", "error_rate"),
-    # 长时压测中文格式（zigbox test_stress.py，经此不依赖 yaml custom 也能入库）:
+    # 长时压测中文格式（kisscore test_stress.py，经此不依赖 yaml custom 也能入库）:
     (r"总请求数:\s*([0-9]+)", "total_requests"),
     (r"错误数:\s*([0-9]+)", "error_count"),
     (r"失败:\s*([0-9]+)", "error_count"),
@@ -184,7 +184,7 @@ class MetricExtractor:
             result["tests_total"] = float(total)
             result["tests_failed"] = float(total - passed - skipped)
         # ⑤ "202 pass (202 total)" — Zig 0.16 --listen=- 输出格式
-        #    （如 "run test zigbox-tests 202 pass (202 total) 56ms MaxRSS:11M"）。
+        #    （如 "run test kisscore-tests 202 pass (202 total) 56ms MaxRSS:11M"）。
         #    0.16 的 listen 模式其实有 count 行，此前 fallthrough 到 exit_code
         #    驱动会误报 1/1（2026-08-18 实测 zig build test 202 测试误记 1）。
         elif m := re.search(r"(\d+)[ \t]+pass[ \t]+\((\d+)[ \t]+total\)", stdout):
@@ -240,7 +240,7 @@ class MetricExtractor:
 
     @staticmethod
     def _parse_test_protocols(stdout: str, exit_code: int) -> dict[str, float]:
-        """解析 zigbox test_protocols.py 输出。
+        """解析 kisscore test_protocols.py 输出。
 
         格式: "总计 X | 通过 Y | 失败 Z | 跳过 W"
         """
@@ -265,7 +265,7 @@ class MetricExtractor:
 
     @staticmethod
     def _parse_bench(stdout: str, exit_code: int) -> dict[str, float]:
-        """解析 zigbox test_bench.py / zigoutbounds test_engine.py 输出，提取吞吐/延迟。
+        """解析 kisscore test_bench.py / zigoutbounds test_engine.py 输出，提取吞吐/延迟。
 
         格式样例:
           吞吐: 520.3 req/s
@@ -281,7 +281,7 @@ class MetricExtractor:
             "exit_code": float(exit_code),
         }
         # 多档并发扫描：收集全部 MODE=... CONCURRENCY=N 机器行及其档位。
-        # 兼容 zigoutbounds bench-tcp（MODE=bench-tcp）与 zigbox 协议扫描
+        # 兼容 zigoutbounds bench-tcp（MODE=bench-tcp）与 kisscore 协议扫描
         # （MODE=socks5/socks4/http/direct，#88）。多协议时按协议命名空间
         # 隔离键 {key}_{mode}_c{N}（+ 各协议裸 {key}_{mode} 保留首档）；
         # 单协议保持向后兼容键 {key}_c{N}（zigoutbounds 历史/阈值不受影响）。

@@ -619,7 +619,7 @@ func handleDns(conn *net.UDPConn, upstream string, realMode bool, realAnswerIP s
 			if query.domain == "localhost" || isTestDomain(query.domain) || isNumericTestDomain(query.domain) {
 				var ips []net.IP
 				if query.domain == "localhost" || realMode {
-					// real 模式(zigbox 矩阵二级 DNS):测试域名解析真实环回
+					// real 模式(kisscore 矩阵二级 DNS):测试域名解析真实环回
 					// 应答 IP 可配(real-dns-answer-ip):本机=127.0.0.1;host 侧 VM 服务=
 					// VM 网关 IP(local-echo 绑 0.0.0.0,VM 经网关访问,解析到网关才是可达地址)
 					if query.qtype == 1 {
@@ -672,12 +672,12 @@ func main() {
 	h3Port := flag.Int("h3-port", 13336, "HTTP/3 echo port")
 	certPath := flag.String("cert", "certs/localhost.crt", "TLS certificate")
 	keyPath := flag.String("key", "certs/localhost.key", "TLS key")
-	httpPort := flag.Int("http-port", 0, "extra protocol-adaptive echo port (0=off; zigbox matrix curl target 18080)")
+	httpPort := flag.Int("http-port", 0, "extra protocol-adaptive echo port (0=off; kisscore matrix curl target 18080)")
 	tlsPort := flag.Int("tls-port", 0, "extra TLS echo port (0=off; SNI sniff scenario 18443)")
 	realityTlsPort := flag.Int("reality-tls-port", 0, "extra TLS echo port with UNTRUSTED cert (0=off; xray reality steal dest 18444)")
 	realityCertPath := flag.String("reality-cert", "certs/reality-untrusted.crt", "untrusted TLS certificate for reality steal dest")
 	realityKeyPath := flag.String("reality-key", "certs/reality-untrusted.key", "untrusted TLS key for reality steal dest")
-	realDnsPort := flag.Int("real-dns-port", 0, "secondary DNS port with real-map semantics (0=off; zigbox matrix 15353)")
+	realDnsPort := flag.Int("real-dns-port", 0, "secondary DNS port with real-map semantics (0=off; kisscore matrix 15353)")
 	realDnsAnswerIP := flag.String("real-dns-answer-ip", "127.0.0.1", "A-record answer IP for real-mode DNS (127.0.0.1 = echo on same host; host-side VM service = VM gateway IP)")
 	benchPort := flag.Int("bench-port", 0, "short-conn bench echo port, 10ms idle close (0=off; bench-tcp 13337)")
 	streamPort := flag.Int("stream-port", 0, "long-conn stream echo port, no idle close (0=off; bench-stream 13338)")
@@ -709,7 +709,7 @@ func main() {
 		fmt.Printf("TCP_ECHO=%s:%d\n", *host, *tcpPort)
 	}
 
-	// ---- 额外 HTTP 回显端口(同协议自适应;zigbox 矩阵 NOTUN curl 目标)----
+	// ---- 额外 HTTP 回显端口(同协议自适应;kisscore 矩阵 NOTUN curl 目标)----
 	if *httpPort > 0 {
 		httpLn, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", *httpPort))
 		if err != nil {
@@ -819,7 +819,7 @@ func main() {
 		fmt.Printf("DNS_ECHO=%s:%d\n", *host, *dnsPort)
 	}
 
-	// ---- 二级 DNS(real-map 模式:测试域名 → 127.0.0.1/::1;zigbox 矩阵)----
+	// ---- 二级 DNS(real-map 模式:测试域名 → 127.0.0.1/::1;kisscore 矩阵)----
 	if *realDnsPort > 0 {
 		realDnsConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(*host), Port: *realDnsPort})
 		if err != nil {
