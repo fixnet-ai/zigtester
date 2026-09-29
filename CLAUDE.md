@@ -159,7 +159,7 @@ ZIGTESTER_ROOT=~/works/2025/fixnet python -m zigtester.server &
 完整 JSON Schema 见 `schemas/zigtester.schema.json`。示例配置见各兄弟项目的 `zigtester.yaml`：
 
 - `../zigfoundation/zigtester.yaml` — 单层级（unit）
-- `../zigbox/zigtester.yaml` — 三层级（unit + functional + performance）+ `plugins: [local-echo]`
+- `../kiss-core/zigtester.yaml` — 三层级（unit + functional + performance）+ `plugins: [local-echo]`
 - `../zigoutbounds/zigtester.yaml` — 三层级（unit + functional + performance）+ `plugins: [local-echo, sing-box]`（长时套件 `bench-long-*` 位于 performance 层，经 `per_suite_only` 隔离）
 
 ### plugins 字段
@@ -243,7 +243,7 @@ local-echo 端口契约（各项目测试脚本共享，禁止项目脚本自行
 
 ## 参考代码
 
-- `../zigbox/tests/lib/report.py` — TestResult/TestSuite 四状态模型（PASS/FAIL/SKIP/ERROR）+ 三路输出（复用模式）
-- `../zigbox/tests/lib/zigbox.py` — 子进程生命周期管理（抽象为 TestExecutor）
-- `../zigbox/tests/SKILL.md` — 3 层测试模型（unit/functional/performance）
+- `../kiss-core/src/zigtester/reporter.py` — TestResult/TestSuite 四状态模型（PASS/FAIL/SKIP/ERROR）（原 `../zigbox/tests/lib/report.py`，已在 `56b4511` 对齐 zigtester 框架时收编进本仓）
+- `../kiss-core/tests/lib/zigbox.py` — 子进程生命周期管理（抽象为 TestExecutor）
+- ~~`../zigbox/tests/SKILL.md`~~ — 3 层测试模型（unit/functional/performance）：该文件已于 `dbac4b0` 删除（**无继任者**），层级定义现以 `../kiss-core/zigtester.yaml` 为准
 - `../zigoutbounds/tests/protocol-tester/` — 依赖管道（crypto-only → E2E）+ benchmark 编排

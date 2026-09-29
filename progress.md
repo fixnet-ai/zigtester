@@ -11,7 +11,7 @@
 - 兄弟项目全部接入：zigfoundation / zigbox / zigtun / zigproxy / zigdns / zigoutbounds + zigroute / zigunicfg。
 - zigtester 自身单测全绿：test_args_passthrough 6 + test_env_guard 15 + test_per_suite_only 4 +
   test_report_history 32 + test_runner_cleanup 2 + test_runner_env + test_plugin_ports + test_target_monitor。
-- **zt-6/zt-7/zt-8/zt-9 全部闭环**（进程组兜底 / Windows taskkill 分支 / FAIL stdout 尾部透传 / launchd Interactive；结论与锚点见 findings 定论表 zt-6..zt-9 行 + zigbox 统一待办 zigtester 表）。**Phase 13 local-cf-dev 插件已收尾关闭（09-01，用户裁定）**——zo 接入闭环、zigbox 裁决不接（纯编排层冗余）；插件保留为 zo 专属。见 task_plan「Phase 13」专段。
+- **zt-6/zt-7/zt-8/zt-9 全部闭环**（进程组兜底 / Windows taskkill 分支 / FAIL stdout 尾部透传 / launchd Interactive；结论与锚点见 findings 定论表 zt-6..zt-9 行 + **kiss** 统一待办 zigtester 表）。**Phase 13 local-cf-dev 插件已收尾关闭（09-01，用户裁定）**——zo 接入闭环、zigbox 裁决不接（纯编排层冗余）；插件保留为 zo 专属。见 task_plan「Phase 13」专段。
 
 ## 近期定论（2026-08-18 → 09-01，指针 → findings 定论位置表 / task_plan，细节不重复）
 

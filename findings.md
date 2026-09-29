@@ -59,7 +59,7 @@
 > 任务与本调研完整事实已下沉，不在此复述正文：ECH 本地不可测 / workerd `connect()` 支持 / 127.0.0.1 vs localhost / `--local-protocol https` 证书复用 / sslip.io 域名重写 / wrangler 三层验证等，**完整事实见 `plugins/local-cf-dev/README.md` + `cfdev_ctl.py` docstring + 定论位置表 local-cf-dev 行**。
 
 - **插件形态（09-01 收尾；de4d628 双 worker 先于收尾落地）**：端口/凭证真相源 = `plugins/local-cf-dev/plugin.yaml` config 段——**VLESS worker 18787 + Trojan worker 18789 双常驻**（per-worker nodejs_compat），**Pages 18788 预留未接线**；协议覆盖边界只 VLESS/Trojan（s5http 不接入）。
-- **接入结论（zigoutbounds）**：VLESS/Trojan-over-WS 协议侧已实现（transport/ws.zig），**27.1 标准形态已落地**（functional×2 + bench-tcp/stream/sweep×6，全 PASS）；**27.2 CF 形态 early data（WS 0-RTT）验证仍开放** → 已移交 **zigbox 统一待办 zo 组**（09-07 第 8 次瘦身登记），见其 zo 表。
+- **接入结论（zigoutbounds）**：VLESS/Trojan-over-WS 协议侧已实现（transport/ws.zig），**27.1 标准形态已落地**（functional×2 + bench-tcp/stream/sweep×6，全 PASS）；**27.2 CF 形态 early data（WS 0-RTT）验证仍开放** → 已移交 **kiss 统一待办 zo 组**（09-07 第 8 次瘦身登记），见其 zo 表。
 
 ## 已结案/已完成（指针 → task_plan）
 
