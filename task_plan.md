@@ -5,7 +5,7 @@
 > **规划瘦身（2026-08-23 起多轮）**：Phase 1-12 详细执行记录已压缩为「历史完成阶段总表」（每阶段一行）；
 > 历史决策完整推导见 git log + DESIGN.md + 代码头部注释（findings 只留「定论位置表」指针）。
 > **已删章节锚点一律以 git log 为准。** 本文档只承载仍在生效的决策；未完成任务已移交
-> zigbox 统一规划（zigbox task_plan.md『跨项目统一待办』）——本文件开放待办仅保留不在统一待办中的项。
+> **kiss** 统一规划（`../kiss/task_plan.md`『跨项目统一待办』；2026-09-30 生态总入口由内核仓移交 kiss）——本文件开放待办仅保留不在统一待办中的项。
 
 ## 当前状态（2026-09-01 内容基线；代码自 09-02 冻结 95d36b2）
 
@@ -18,7 +18,7 @@
 
 ## 开放待办（历史，均已闭环）
 
-- 全闭环史实不在此逐条复述：**zt-2/zt-6/zt-7/zt-8/zt-9** 的结论与锚点统一见 **zigbox task_plan『跨项目统一待办』zigtester 分组表** 与本仓 findings「定论位置表」zt-6..zt-9 行（进程组兜底 / Windows taskkill 分支 / FAIL stdout 尾部透传 / launchd Interactive）。本文件仅留此一条交叉锚点。
+- 全闭环史实不在此逐条复述：**zt-2/zt-6/zt-7/zt-8/zt-9** 的结论与锚点统一见 **kiss task_plan『跨项目统一待办』zigtester 分组表** 与本仓 findings「定论位置表」zt-6..zt-9 行（进程组兜底 / Windows taskkill 分支 / FAIL stdout 尾部透传 / launchd Interactive）。本文件仅留此一条交叉锚点。
 
 ## 历史完成阶段总表（Phase 1-12，全部完成）
 
@@ -33,7 +33,7 @@
 | 5 | 最终验证 | scan 全 6 项目 + `--all --level unit` 全绿；token 合计 -93% | git log |
 | 6 | 测试生命周期管理 | setup/teardown + readiness probe + 插件体系 + local-echo 迁移（Python→Go） | git log |
 | 7 | sing-box 插件 | 统一配置 test_server.json + serve 直启（Clash API 热重载不可行）+ 端口表 | git log + singbox_ctl.py |
-| 8 | xray-core 插件 | 插件本体 + 跨插件端口冲突检测；zigoutbounds 接入见 zigbox 统一待办 | git log + xray_ctl.py |
+| 8 | xray-core 插件 | 插件本体 + 跨插件端口冲突检测；zigoutbounds 接入见 **kiss** 统一待办 | git log + xray_ctl.py |
 | 9 | 环境统一治理 + pre-flight | PluginManager 三层校验 + 自愈 + fast fail + 生态铁律 | git log + plugin.py |
 | 10 | 测试流畅性改进 | failure_lines / flaky 检测 / 分组并行 / scenarios fast fail | git log |
 | 11 | flaky 根因修复 + 插件管道排空 | zigproxy 客户端超时缺陷 + zigdns FakeIP 期望 + PIPE drain | git log |
