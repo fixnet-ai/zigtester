@@ -583,6 +583,59 @@ def _proc_cmdline(pid: int) -> str:
         return ""
 
 
+def _netstat_line_owner_pid(line: str, port: int) -> int | None:
+    """从 macOS `netstat -anv -p tcp` 一行中提取本地端口匹配的持有者 PID。
+
+    netstat 行样例（lsof 对 root 进程不可见时的兜底取证来源）::
+        tcp4  0  0  127.0.0.1.19090  *.*  LISTEN  0  0  131072  131072  kiss:30384  00180 ...
+
+    地址列为点分格式（`host.port`，无冒号），持有者列为 `name:pid` —— 冒号在该行
+    里几乎只出现在持有者字段，故按 token 形状识别，不依赖列号。
+    """
+    tokens = line.split()
+    if len(tokens) < 5:
+        return None
+    # v6 行的本地地址可能带尾点（`::1.29090.`），先归一
+    local = tokens[3].rstrip(".")
+    # 只看 LISTEN 行的本地地址（`127.0.0.1.P` / `*.P` / `::1.P`）
+    if not local.endswith(f".{port}"):
+        return None
+    if len(tokens) < 6 or tokens[5] != "LISTEN":
+        return None
+    for tok in reversed(tokens):
+        if ":" not in tok:
+            continue
+        name, _, pid_str = tok.rpartition(":")
+        if name and pid_str.isdigit() and 0 < len(pid_str) <= 7:
+            return int(pid_str)
+    return None
+
+
+def _port_holder_diag(port: int) -> str:
+    """端口清理失败时的持有者取证（进入 setup_error，帮下一次定位）。
+
+    lsof 只能看到当前用户的进程；root 持有者（如本机常驻 KISS 特权服务占
+    产品 HTTP 门面口）对 lsof 不可见，但 macOS netstat -anv 仍给出
+    `name:pid`。识别成功返回「PID + 命令行」，失败返回空串。
+    """
+    if sys.platform != "darwin":
+        return ""
+    try:
+        out = subprocess.run(
+            ["netstat", "-anv", "-p", "tcp"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return ""
+    for line in out.stdout.splitlines():
+        pid = _netstat_line_owner_pid(line, port)
+        if pid is not None:
+            cmdline = _proc_cmdline(pid)
+            hint = f"PID {pid}: {cmdline[:120]}" if cmdline else f"PID {pid}"
+            return f"（持有者 {hint} — 非插件进程不自动清理）"
+    return ""
+
+
 def _cleanup_stale_processes(plugins: list[PluginConfig], ports: list[int]) -> tuple[bool, list[str]]:
     """清理声明端口上的残留插件进程。
 
@@ -628,7 +681,9 @@ def _cleanup_stale_processes(plugins: list[PluginConfig], ports: list[int]) -> t
         time.sleep(0.3)
 
     leftovers = [
-        f"端口 {p} 仍被占用" for p in ports if _port_listening("127.0.0.1", p)
+        f"端口 {p} 仍被占用{_port_holder_diag(p)}"
+        for p in ports
+        if _port_listening("127.0.0.1", p)
     ]
     return (not leftovers and not unresolved), unresolved + leftovers
 
