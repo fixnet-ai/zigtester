@@ -223,6 +223,8 @@ async def zigtester_run(
     suite: str | None = None,
     dir: str | None = None,
     args: str | None = None,
+    fail_fast: bool = False,
+    no_build: bool = False,
     ctx: Context | None = None,
 ) -> dict:
     """执行测试并返回结构化结果 — 所有测试的唯一入口。
@@ -248,6 +250,10 @@ async def zigtester_run(
         dir: 项目目录路径（或其任意子目录，自动向上查找 zigtester.yaml），默认当前目录
         args: 透传给测试命令尾部的非标准参数（如 "-n 10"），可选；
               非空时不保存历史也不做回归对比
+        fail_fast: 首个 FAIL 即停止（后续套件记 SKIP）。长全量跑在已知红灯后
+              止损能省大量时间；默认 False（完整收集）
+        no_build: 跳过构建步骤。仅当确信二进制已最新时用——构建失败默认会
+              把全部套件记 ERROR（zt-10 假绿防护），此参数是唯一逃生门
     """
     from .config import VALID_LEVELS
     from .reporter import Reporter
@@ -268,10 +274,17 @@ async def zigtester_run(
         # 长任务：线程池跑 run_project，事件循环发 progress 心跳保活，
         # 避免同步阻塞导致 MCP 客户端超时。
         pr = await _run_with_progress(
-            ctx, lambda: run_project(p, levels, suite_filter=suite, suite_args=args)
+            ctx,
+            lambda: run_project(
+                p, levels, fail_fast=fail_fast, no_build=no_build,
+                suite_filter=suite, suite_args=args,
+            ),
         )
     else:
-        pr = run_project(p, levels, suite_filter=suite, suite_args=args)
+        pr = run_project(
+            p, levels, fail_fast=fail_fast, no_build=no_build,
+            suite_filter=suite, suite_args=args,
+        )
 
     # 回归对比（MCP-only）：在保存历史之前进行——此时本次记录未入库，
     # 不污染基线（保存顺序：先查历史再写库）。非标准参数探测（args 非空）

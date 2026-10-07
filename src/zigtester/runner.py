@@ -643,14 +643,20 @@ def run_project(
     cfg = project.config
     work_dir = os.path.join(project.path, cfg.settings.work_dir or ".")
 
-    # 可选构建
-    if not no_build and cfg.settings.build_command:
-        _run_build(cfg.settings.build_command, work_dir)
-
     # 确定要执行的层级
     target_levels = [l for l in levels if l in cfg.levels] if levels else [
         name for name, lc in cfg.levels.items() if lc.suites
     ]
+
+    # 可选构建（zt-10：失败/超时即整体 ERROR——拒绝在陈旧二进制上收集证据；
+    # 逃生门 no_build）
+    if not no_build and cfg.settings.build_command:
+        try:
+            _run_build(cfg.settings.build_command, work_dir)
+        except BuildFailure as e:
+            print(f"[zigtester] {e}", file=sys.stderr)
+            _abort_with_build_error(result, cfg, target_levels, str(e))
+            return result
 
     # ── 插件生命周期（project 级，每 suite 前自检自愈）──
     # 环境被外部破坏（插件被误杀/端口被残留进程抢占）时：
@@ -751,6 +757,36 @@ def _abort_with_env_error(
     fatal: str,
 ) -> None:
     """环境致命错误 — 首个套件 ERROR + 其余全部 SKIP，禁止在残缺环境上跑测试。"""
+    _abort_all_suites(
+        result, cfg, target_levels, fatal,
+        error_message="测试环境自检失败（自动恢复未成功）— 见测试环境规范",
+        skip_message="环境自检失败: 跳过（环境未恢复）",
+    )
+
+
+def _abort_with_build_error(
+    result: ProjectResult,
+    cfg: ProjectConfig,
+    target_levels: list[str],
+    fatal: str,
+) -> None:
+    """构建失败（zt-10）— 首个套件 ERROR + 其余全部 SKIP，禁止在陈旧二进制上跑测试。"""
+    _abort_all_suites(
+        result, cfg, target_levels, fatal,
+        error_message="构建失败 — 拒绝在陈旧二进制上跑测试（zt-10 假绿防护）",
+        skip_message="构建失败: 跳过（二进制陈旧）",
+    )
+
+
+def _abort_all_suites(
+    result: ProjectResult,
+    cfg: ProjectConfig,
+    target_levels: list[str],
+    fatal: str,
+    error_message: str,
+    skip_message: str,
+) -> None:
+    """setup 级致命错误的统一收口：首个套件 ERROR（带原文），其余全部 SKIP。"""
     first = True
     for level_name in target_levels:
         level_cfg = cfg.levels.get(level_name)
@@ -763,7 +799,7 @@ def _abort_with_env_error(
                         suite_name=suite.name,
                         level=level_name,
                         status="ERROR",
-                        message="测试环境自检失败（自动恢复未成功）— 见测试环境规范",
+                        message=error_message,
                         setup_error=fatal,
                     )
                 )
@@ -774,7 +810,7 @@ def _abort_with_env_error(
                         suite_name=suite.name,
                         level=level_name,
                         status="SKIP",
-                        message="环境自检失败: 跳过（环境未恢复）",
+                        message=skip_message,
                     )
                 )
     result.finished_at = time.time()
@@ -955,17 +991,37 @@ def _wait_process_ready(name: str, timeout: int, interval: float) -> bool:
     return False
 
 
-def _run_build(build_command: str, work_dir: str) -> None:
-    """执行构建命令，失败不影响测试（仅警告）。"""
+class BuildFailure(Exception):
+    """构建步骤失败/超时（zt-10 假绿防护：拒绝在陈旧二进制上跑套件）。"""
+
+
+def _run_build(build_command: str, work_dir: str, timeout: int = 300) -> None:
+    """执行构建命令；失败或超时 raise BuildFailure（附 stderr 尾部）。
+
+    zt-10（09-25 挖出，10-07 修复）：旧实现丢弃 returncode + except-pass，
+    编译失败时旧二进制照跑、套件仍报 PASS —— 构建失败状态下的假绿，
+    污染所有 functional 绿灯的证据力。构建是证据链第一环，失败必须挡在
+    套件前（run_project 会把全部套件记 ERROR）。逃生门 = no_build
+    （CLI --no-build / MCP no_build=true：明知二进制最新时跳过构建）。
+    """
+    cmd = shlex.split(build_command)
     try:
-        cmd = shlex.split(build_command)
-        subprocess.run(
+        proc = subprocess.run(
             cmd, cwd=work_dir,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            timeout=300,
+            timeout=timeout,
         )
-    except Exception:
-        pass  # 构建失败不阻止测试
+    except subprocess.TimeoutExpired as e:
+        raise BuildFailure(
+            f"构建超时（>{timeout}s）：{build_command}"
+        ) from e
+    if proc.returncode != 0:
+        tail = (proc.stderr or b"").decode(errors="replace").strip()
+        tail_lines = "\n".join(tail.splitlines()[-8:])
+        detail = f"\n{tail_lines}" if tail_lines else ""
+        raise BuildFailure(
+            f"构建失败 rc={proc.returncode}：{build_command}{detail}"
+        )
 
 
 def _filter_suites(
