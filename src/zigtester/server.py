@@ -336,14 +336,16 @@ async def zigtester_run(
             "metrics": s.metrics,
             "message": s.message,
         }
-        # 仅失败时包含失败用例行（数据源 stdout）和 stderr 摘要（最多 500 字符）
+        # 仅失败时包含失败用例行（数据源 combined：zig 0.16 失败命名行在
+        # stderr，排期视图 #15 断点①）和 stderr 摘要（最多 1500 字符——
+        # 500 时常把失败详情截在窗外，断点③）
         if s.status in ("FAIL", "ERROR"):
-            from .reporter import extract_failure_lines
-            failure_lines = extract_failure_lines(s.stdout)
+            from .reporter import combined_text, extract_failure_lines
+            failure_lines = extract_failure_lines(combined_text(s.stdout, s.stderr))
             if failure_lines:
                 entry["failure_lines"] = failure_lines
         if s.status in ("FAIL", "ERROR") and s.stderr:
-            entry["stderr_tail"] = s.stderr[-500:]
+            entry["stderr_tail"] = s.stderr[-1500:]
         if s.setup_error:
             entry["setup_error"] = s.setup_error
         if s.teardown_error:

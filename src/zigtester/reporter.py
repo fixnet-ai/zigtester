@@ -51,19 +51,44 @@ _STATUS_ICONS = {
 # ANSI 色码（提取失败行时剥离）
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
+# Zig test 失败命名行（0.16 实测格式，2026-10-07 真样本：exit=1 时 stdout 全空、
+# 失败详情全在 stderr）：
+#   error: 'main.test.will fail' failed:
+#   error: 'xxx' leaked
+# 紧规则防误报：error: + 单引号用例名 + failed/leaked —— 不匹配
+# 「error: the following build command failed…」「failed command: …」等非用例行。
+_ZIG_TEST_FAIL_RE = re.compile(r"^error:[ \t]+'[^']+'[ \t]+(?:failed|leaked)")
+
+
+def combined_text(stdout: str | None, stderr: str | None) -> str:
+    """stdout+stderr 合一（与 metrics 解析同口径）。
+
+    zig 0.16 的 run 计数行与失败命名行多打到 stderr；此前 failure_lines
+    只喂 stdout ⇒ zig 套件失败时提取恒为空（排期视图 #15 断点①）。
+    """
+    if stdout and stderr:
+        return stdout + "\n" + stderr
+    return stdout or stderr or ""
+
 
 def extract_failure_lines(text: str, limit: int = 10) -> list[str]:
     """从原始输出提取失败用例行。
 
-    匹配含 "✗" / "FAIL" / "ERROR:" 的行，剥离 ANSI 色码，
-    strip 后每行截断 160 字符，最多 limit 行。
+    匹配 zig 失败命名行（error: '<名>' failed/leaked）或含 "✗" / "FAIL" /
+    "ERROR:" 的行，剥离 ANSI 色码，strip 后每行截断 160 字符，最多 limit 行。
     """
     if not text:
         return []
     lines: list[str] = []
     for raw in text.splitlines():
         stripped = _ANSI_RE.sub("", raw).strip()
-        if "✗" not in stripped and "FAIL" not in stripped and "ERROR:" not in stripped:
+        is_zig_fail = _ZIG_TEST_FAIL_RE.match(stripped) is not None
+        if (
+            not is_zig_fail
+            and "✗" not in stripped
+            and "FAIL" not in stripped
+            and "ERROR:" not in stripped
+        ):
             continue
         lines.append(stripped[:160])
         if len(lines) >= limit:
@@ -393,8 +418,9 @@ class Reporter:
             print(f"      {_DIM}res: n/a{_RESET}")
 
         # 失败/错误套件：打印失败用例行（始终显示，非 verbose 也展示关键信息）
-        failure_lines = extract_failure_lines(suite.stdout or "")
-        if suite.status in ("FAIL", "ERROR") and suite.stdout:
+        # 喂 combined：zig 0.16 失败命名行在 stderr（排期视图 #15 断点①）
+        failure_lines = extract_failure_lines(combined_text(suite.stdout, suite.stderr))
+        if suite.status in ("FAIL", "ERROR") and (suite.stdout or suite.stderr):
             for fl in failure_lines:
                 print(f"      {_RED}{fl}{_RESET}")
 
@@ -545,9 +571,9 @@ class Reporter:
                              if k in ("rss_growth_mb", "fd_growth", "cpu_head_pct", "cpu_tail_pct")},
                 },
             }
-            # 失败/错误套件附带失败用例行（数据源 stdout）
+            # 失败/错误套件附带失败用例行（数据源 combined：zig 失败行在 stderr）
             if s.status in ("FAIL", "ERROR"):
-                failure_lines = extract_failure_lines(s.stdout)
+                failure_lines = extract_failure_lines(combined_text(s.stdout, s.stderr))
                 if failure_lines:
                     d["failure_lines"] = failure_lines
             if s.setup_error:
