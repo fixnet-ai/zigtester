@@ -82,6 +82,13 @@ class MetricExtractor:
 
     def _parse_builtin(self, stdout: str, exit_code: int) -> dict[str, float]:
         """使用内置解析器。"""
+        # zt-12（2026-10-21）：`parser: custom` 不是内置解析器——custom 是叠加层
+        # （任何 parser 都会叠加自定义正则，见 extract）。此前 getattr 命名空间把
+        # `_parse_custom` 也当内置基底调用（它不吃 exit_code）→ `parser: custom`
+        # 一用即 TypeError 崩整 run（runner.py 调用点无 try）。custom 模式 = 无
+        # 内置基底，指标全部来自自定义正则。
+        if self.parser_name == "custom":
+            return {}
         parser = getattr(self, f"_parse_{self.parser_name}", None)
         if parser is None:
             # 未知解析器 → 退化为 line_count
