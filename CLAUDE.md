@@ -11,8 +11,7 @@
 ```
 fixnet/
   zigfoundation/  ← 基础库
-  libxev/         ← 异步 I/O 事件循环
-  zigtun/         ← TUN 设备库
+    zigtun/         ← TUN 设备库
   zigproxy/       ← 代理协议库
   zigdns/         ← DNS 组件库
   zigoutbounds/   ← 重量出站协议
