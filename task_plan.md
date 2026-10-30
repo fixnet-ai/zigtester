@@ -7,9 +7,9 @@
 > **已删章节锚点一律以 git log 为准。** 本文档只承载仍在生效的决策；未完成任务已移交
 > **kiss** 统一规划（`../kiss/task_plan.md`『跨项目统一待办』；2026-09-30 生态总入口由内核仓移交 kiss）——本文件开放待办仅保留不在统一待办中的项。
 
-## 当前状态（2026-09-01 内容基线；代码自 09-02 冻结 95d36b2）
+## 当前状态（2026-09-01 内容基线；代码口径见下方 10-30 刷新注）
 
-- **代码自 09-02 冻结（95d36b2 = HEAD）**：本仓 tag v0.34/v0.35/v0.36 均指该 commit；生态 tag 已推进至 v0.37.0（09-06，同 commit，期间生态开发对 zigtester 无代码影响）。
+- **代码口径（10-30 刷新）**：09-02 起长期冻结于 95d36b2 的说法已过时——此后已落 zt-10（7b09770）、失败提取器（5c48690）、zt-12（6289e15），HEAD 随生态推进；旧 tag v0.34/v0.35/v0.36 指 95d36b2（09-06，同 commit，期间生态开发对 zigtester 无代码影响）。
 - 分支 `main`，全部 Phase 1-12 完成（2026-08-07 → 08-21）+ A/B/C/D 性能架构重构完成（08-25）。
 - zigtester 自身单测全绿：test_args_passthrough 6 + test_env_guard 15 + test_per_suite_only 4 +
   test_report_history 32 + test_runner_cleanup 2 + test_runner_env/test_plugin_ports/test_target_monitor。
