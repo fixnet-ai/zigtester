@@ -270,21 +270,29 @@ async def zigtester_run(
             return {"error": f"无效层级: {level}，有效值: {', '.join(VALID_LEVELS)}"}
         levels = [level]
 
-    if ctx is not None:
-        # 长任务：线程池跑 run_project，事件循环发 progress 心跳保活，
-        # 避免同步阻塞导致 MCP 客户端超时。
-        pr = await _run_with_progress(
-            ctx,
-            lambda: run_project(
+    from .run_guard import RunLockBusy, run_lock
+
+    def _locked_run():
+        # #10 互杀收口：flock 全局互斥，与 CLI 共用同一把锁（锁文件 ~/.zigtester/run.lock）。
+        # acquire 是阻塞轮询，必须在 to_thread 工作线程内进入——绝不能碰事件循环。
+        with run_lock():
+            return run_project(
                 p, levels, fail_fast=fail_fast, no_build=no_build,
                 suite_filter=suite, suite_args=args,
-            ),
-        )
-    else:
-        pr = run_project(
-            p, levels, fail_fast=fail_fast, no_build=no_build,
-            suite_filter=suite, suite_args=args,
-        )
+            )
+
+    try:
+        if ctx is not None:
+            # 长任务：线程池跑 run_project，事件循环发 progress 心跳保活，
+            # 避免同步阻塞导致 MCP 客户端超时。
+            pr = await _run_with_progress(ctx, _locked_run)
+        else:
+            pr = _locked_run()
+    except RunLockBusy:
+        return {
+            "error": "busy: 另一个 zigtester run 正在执行（#10 并发互杀防护），"
+                     "稍后重试即可",
+        }
 
     # 回归对比（MCP-only）：在保存历史之前进行——此时本次记录未入库，
     # 不污染基线（保存顺序：先查历史再写库）。非标准参数探测（args 非空）

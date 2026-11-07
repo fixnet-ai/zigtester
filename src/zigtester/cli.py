@@ -13,6 +13,7 @@ from .autostart import cmd_install, cmd_status, cmd_uninstall
 from .config import VALID_LEVELS
 from .history import check_regression, load_history
 from .reporter import Reporter
+from .run_guard import RunLockBusy, run_lock
 from .runner import run_project, run_workspace
 from .scanner import discover
 
@@ -97,13 +98,19 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
 
     if len(target_projects) == 1:
-        pr = run_project(
-            target_projects[0], levels,
-            fail_fast=args.fail_fast,
-            no_build=args.no_build,
-            suite_filter=args.suite,
-            suite_args=args.args,
-        )
+        # #10 互杀收口：与 MCP server 共用 flock 全局互斥（busy = 另一 run 在飞）。
+        try:
+            with run_lock():
+                pr = run_project(
+                    target_projects[0], levels,
+                    fail_fast=args.fail_fast,
+                    no_build=args.no_build,
+                    suite_filter=args.suite,
+                    suite_args=args.args,
+                )
+        except RunLockBusy as e:
+            print(f"[zigtester] busy: {e}", file=sys.stderr)
+            return 2
         reporter.print_results(pr)
 
         if args.json_output:
@@ -122,12 +129,19 @@ def cmd_run(args: argparse.Namespace) -> int:
         all_ok = all(s.status in ("PASS", "SKIP") for s in pr.suites)
         return 0 if all_ok else 1
     else:
-        ws = run_workspace(
-            target_projects, levels,
-            parallel=args.parallel,
-            fail_fast=args.fail_fast,
-            no_build=args.no_build,
-        )
+        # #10：workspace run 与 MCP/单项目 run 共用全局互斥；锁在 run 边界，
+        # run_workspace 内部 --parallel 的项目间串行防护不受影响。
+        try:
+            with run_lock():
+                ws = run_workspace(
+                    target_projects, levels,
+                    parallel=args.parallel,
+                    fail_fast=args.fail_fast,
+                    no_build=args.no_build,
+                )
+        except RunLockBusy as e:
+            print(f"[zigtester] busy: {e}", file=sys.stderr)
+            return 2
         reporter.print_workspace_results(ws)
 
         if args.json_output:
