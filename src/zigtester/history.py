@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import threading
@@ -661,3 +662,95 @@ def _is_metric_regression(
 
     # 默认双向检测
     return True
+
+
+# ── timeout 审计（zt-11 ③）─────────────────────────────────
+
+def audit_suite_timeout(
+    timeout_s: int,
+    pass_durations_ms: list[float],
+    any_durations_ms: list[float],
+    min_slack_s: float = 120.0,
+) -> dict | None:
+    """纯函数：对单套件做 timeout 预算审计。无足够历史返回 None。
+
+    判据（09-26 源定义，建议 ③）：
+    - redundant: timeout / P95 > 20 —— 预算冗余，建议收紧到 ≈max(P95×2, 30s)
+    - drift:     timeout / max(PASS) > 10 —— 按历史最坏值设值的单调漂移形态
+    - hit_ceiling: 任一记录 duration ≥ timeout×0.95 —— 曾触顶（预算不足或已被抬高）
+
+    min_slack_s：冗余/漂移只在绝对富余（timeout − P95/max）≥ 该值时报——亚秒级
+    套件的百倍「冗余」无止损价值（全量墙钟浪费 <2min），只产 token 噪声；
+    hit_ceiling 与富余量无关（预算正确性问题），恒报。
+
+    P95 取 PASS 记录（失败/超时记录的时长是截断值，不是真实耗时分布）；
+    hit_ceiling 扫全部记录（超时被杀的记录 duration≈timeout 恰好是触顶证据）。
+    """
+    if len(pass_durations_ms) < 3:
+        return None
+    sorted_ms = sorted(pass_durations_ms)
+    rank = max(1, math.ceil(0.95 * len(sorted_ms)))
+    p95_ms = sorted_ms[rank - 1]
+    max_pass_ms = sorted_ms[-1]
+    p95_s = p95_ms / 1000
+    max_pass_s = max_pass_ms / 1000
+
+    warnings: list[str] = []
+    if p95_s > 0:
+        suggest_s = max(p95_s * 2, 30.0)
+        if timeout_s / p95_s > 20 and (timeout_s - p95_s) >= min_slack_s:
+            warnings.append(
+                f"redundant: 预算冗余 {timeout_s / p95_s:.0f}×（P95={p95_s:.1f}s，建议 ≈{suggest_s:.0f}s）"
+            )
+        if (
+            max_pass_s > 0
+            and timeout_s / max_pass_s > 10
+            and (timeout_s - max_pass_s) >= min_slack_s
+        ):
+            warnings.append(
+                f"drift: timeout/历史最坏={timeout_s / max_pass_s:.0f}×（按最坏值设预算的漂移形态）"
+            )
+    if any(d >= timeout_s * 1000 * 0.95 for d in any_durations_ms):
+        warnings.append("hit_ceiling: 曾触顶/被超时截断——预算可能不足或已被单调抬高")
+
+    if not warnings:
+        return None
+    return {
+        "timeout_s": timeout_s,
+        "p95_s": round(p95_s, 1),
+        "max_pass_s": round(max_pass_s, 1),
+        "warnings": warnings,
+    }
+
+
+def audit_timeouts(pr: "ProjectResult", cfg: "ProjectConfig") -> list[dict]:
+    """对项目全部套件做 timeout 预算审计（zt-11 ③），返回告警行（空列表 = 健康）。
+
+    数据源 = 本地 history DB 最近 30 条/套件；在 save_run 之后调用则含本次记录。
+    历史不足 3 条 PASS 的新套件不出行（无分布可审）。
+    """
+    rows: list[dict] = []
+    for level_name, level_cfg in cfg.levels.items():
+        for suite in level_cfg.suites:
+            try:
+                records = load_history(pr.project, suite.name, n=30)
+            except Exception:
+                continue
+            if not records:
+                continue
+            pass_ms = [
+                r["duration_ms"] for r in records
+                if r.get("status") == "PASS" and r.get("duration_ms") is not None
+            ]
+            any_ms = [
+                r["duration_ms"] for r in records
+                if r.get("duration_ms") is not None
+            ]
+            verdict = audit_suite_timeout(suite.timeout, pass_ms, any_ms)
+            if verdict is not None:
+                rows.append({
+                    "suite": suite.name,
+                    "level": level_name,
+                    **verdict,
+                })
+    return rows

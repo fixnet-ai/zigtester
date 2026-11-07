@@ -331,6 +331,12 @@ async def zigtester_run(
             save_run(pr, pid, p.path)
         except Exception:
             pass
+        # zt-11 ③ timeout 审计：save 之后查库（含本次记录），预算冗余/漂移/触顶告警
+        try:
+            from .history import audit_timeouts
+            pr.timeout_audit = audit_timeouts(pr, p.config)
+        except Exception:
+            pass
 
     # 构建精简响应 — 不含 stdout/stderr 原文
     suites_out = []
@@ -396,6 +402,8 @@ async def zigtester_run(
             "errors": all_err,
         },
         "suites": suites_out,
+        # zt-11 ③：timeout 预算审计（空/无告警时省略，不烧 token）
+        **({"timeout_audit": pr.timeout_audit} if pr.timeout_audit else {}),
         "regressions": {
             suite_name: [
                 {

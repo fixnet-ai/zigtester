@@ -13,6 +13,11 @@ import yaml
 # ── 数据模型 ──────────────────────────────────────────────
 
 DEFAULT_TIMEOUT = 120
+# zt-11 ⑤：timeout ≥ 该值的套件默认单跑（--suite 显式运行），全量执行自动跳过。
+# 逃生门 = allow_full_run: true（用于必须参与 level 全量门禁的套件，如 unit all-tests）。
+# 与手工标记 per_suite_only 的区别：这是机制默认，防「300s 套件混进全量把最坏墙钟
+# 推到小时级无人中止」（zigroute 0/11 · zigstack 0/10 覆盖缺口的根因）。
+IMPLICIT_SOLO_TIMEOUT_S = 300
 # 4 层级（2026-08-25 A/B/C/D 新增 performance-scenarios）：压力/疲劳/分流场景独立层，
 # per_suite_only 只约束默认 performance 层全量，独立层内全量可跑。注意 analyze_leak
 # 自动开仅匹配 level=='performance'（见 _parse_suite），迁入 performance-scenarios 的
@@ -93,6 +98,9 @@ class ProjectSettings:
     work_dir: str = "."
     build_command: str | None = None
     timeout_default: int = 120
+    # zt-11 ②：run 级总预算（秒）。>0 生效；0 = 回退 env ZIGTESTER_TOTAL_BUDGET_S（默认 3600）。
+    # 预算耗尽后剩余套件 SKIP（不改单套件语义——预算是止损线，不是硬墙）。
+    total_budget_s: int = 0
     env: dict[str, str] = field(default_factory=dict)
     resource_sampling: ResourceSampling = field(default_factory=ResourceSampling)
 
@@ -118,10 +126,22 @@ class SuiteConfig:
     sampling_interval_s: float = 0.2
     analyze_leak: bool = False          # 框架泄漏判定(默认仅 performance+per_suite_only 自动开)
     leak_window_s: float = 30.0
+    # zt-11 ①：no-output watchdog 静默窗口（秒）。0 = 用默认（非 zig_test 300s /
+    # zig_test 900s——编译期合法静默更长）；仅当窗口 < timeout 才武装。
+    no_output_timeout_s: int = 0
+    # zt-11 ⑤ 逃生门：timeout≥300s 但仍须参与 level 全量门禁的套件置 true。
+    allow_full_run: bool = False
 
     @property
     def qualified_name(self) -> str:
         return self.name
+
+    @property
+    def solo_by_default(self) -> bool:
+        """全量执行时是否应跳过：显式 per_suite_only，或 timeout≥300s 且未解锁全量。"""
+        return self.per_suite_only or (
+            self.timeout >= IMPLICIT_SOLO_TIMEOUT_S and not self.allow_full_run
+        )
 
 
 @dataclass
@@ -164,6 +184,8 @@ class SuiteResult:
     message: str = ""
     setup_error: str = ""
     teardown_error: str = ""
+    # zt-11 ①：被框架杀死的原因（""=正常结束 / "timeout"=硬超时 / "no_output(<s>)"=静默 watchdog）
+    kill_reason: str = ""
 
 
 @dataclass
@@ -175,6 +197,8 @@ class ProjectResult:
     started_at: float = 0.0
     finished_at: float = 0.0
     suite_args: str | None = None    # 透传的非标准压测参数（如 "-n 10"），非空时不保存历史
+    # zt-11 ③：timeout 审计行（history.audit_timeouts 产出，空列表 = 无告警/历史不足）
+    timeout_audit: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -298,6 +322,8 @@ def _parse_suite(
         sampling_interval_s=rs.interval_s,
         analyze_leak=bool(analyze_leak),
         leak_window_s=float(raw.get("leak_window_s", rs.leak_window_s)),
+        no_output_timeout_s=int(raw.get("no_output_timeout_s", 0)),
+        allow_full_run=bool(raw.get("allow_full_run", False)),
     )
 
 
@@ -309,6 +335,7 @@ def _parse_settings(raw: dict | None) -> ProjectSettings:
         work_dir=str(raw.get("work_dir", ".")),
         build_command=raw.get("build_command"),
         timeout_default=int(raw.get("timeout_default", DEFAULT_TIMEOUT)),
+        total_budget_s=int(raw.get("total_budget_s", 0)),
         env={str(k): str(v) for k, v in raw.get("env", {}).items()},
         resource_sampling=ResourceSampling(
             interval_s=float(rs_raw.get("interval_s", 0.2)),

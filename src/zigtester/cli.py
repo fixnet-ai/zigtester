@@ -125,6 +125,14 @@ def cmd_run(args: argparse.Namespace) -> int:
                 save_run(pr, pid, target_projects[0].path)
             except Exception:
                 pass
+            # zt-11 ③：save 后审计（含本次），reporter.print_timeout_audit 输出
+            try:
+                from .history import audit_timeouts
+                pr.timeout_audit = audit_timeouts(pr, target_projects[0].config)
+                if pr.timeout_audit:
+                    reporter.print_timeout_audit(pr)
+            except Exception:
+                pass
 
         all_ok = all(s.status in ("PASS", "SKIP") for s in pr.suites)
         return 0 if all_ok else 1
@@ -173,6 +181,15 @@ def cmd_run(args: argparse.Namespace) -> int:
                     pid = ensure_project_id(proj.config_path, proj.config) if proj else pr.project
                     path = proj.path if proj else ""
                     save_run(pr, pid, path)
+                except Exception:
+                    pass
+                # zt-11 ③：save 后逐项目审计
+                try:
+                    if proj is not None:
+                        from .history import audit_timeouts
+                        pr.timeout_audit = audit_timeouts(pr, proj.config)
+                        if pr.timeout_audit:
+                            reporter.print_timeout_audit(pr)
                 except Exception:
                     pass
 

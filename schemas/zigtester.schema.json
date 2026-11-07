@@ -39,6 +39,12 @@
           "minimum": 1,
           "description": "默认超时（秒）"
         },
+        "total_budget_s": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "description": "zt-11 ② run 级总预算（秒）；0 = 回退 env ZIGTESTER_TOTAL_BUDGET_S（默认 3600）；耗尽后剩余套件 SKIP（止损不改单套件语义）"
+        },
         "env": {
           "type": "object",
           "description": "全局环境变量",
@@ -115,6 +121,17 @@
           "type": "boolean",
           "default": false,
           "description": "仅允许 --suite 单独运行；所在 level 全量执行时自动跳过（禁止一次跑全部压测）"
+        },
+        "allow_full_run": {
+          "type": "boolean",
+          "default": false,
+          "description": "zt-11 ⑤ 逃生门：timeout≥300s 的套件默认同 per_suite_only（全量跳过），置 true 解锁 level 全量门禁（如 unit all-tests）"
+        },
+        "no_output_timeout_s": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "description": "zt-11 ① no-output watchdog 静默窗口秒数；0 = 默认（非 zig_test 300 / zig_test 900），仅当窗口 < timeout 才武装；env ZIGTESTER_NO_OUTPUT_TIMEOUT_S 可全局覆盖默认"
         },
         "parser": {
           "type": "string",

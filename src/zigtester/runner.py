@@ -8,6 +8,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -168,8 +169,9 @@ class TestExecutor:
             test_proc = self._start_process(cmd_parts, env, suite.sudo, work_dir)
             monitor.start(test_proc.pid, interval_s=suite.sampling_interval_s, target=suite.target)
 
-            stdout, stderr, exit_code = self._wait_with_timeout_proc(
-                test_proc, suite.timeout
+            no_output_s = _effective_no_output_timeout(suite)
+            stdout, stderr, exit_code, kill_reason = self._wait_with_timeout_proc(
+                test_proc, suite.timeout, no_output_timeout_s=no_output_s
             )
 
         except Exception as e:
@@ -202,6 +204,7 @@ class TestExecutor:
         elapsed = (time.time() - started) * 1000
         result.duration_ms = round(elapsed, 1)
         result.exit_code = exit_code
+        result.kill_reason = kill_reason
         result.stdout = stdout
         result.stderr = stderr
 
@@ -276,27 +279,76 @@ class TestExecutor:
         )
 
     def _wait_with_timeout_proc(
-        self, proc: subprocess.Popen, timeout: int
-    ) -> tuple[str, str, int]:
-        """等待子进程完成，超时则渐进杀死。
+        self,
+        proc: subprocess.Popen,
+        timeout: int,
+        no_output_timeout_s: int = 0,
+    ) -> tuple[str, str, int, str]:
+        """等待子进程完成，超时/静默卡死则渐进杀死（zt-11 ①）。
+
+        旧实现 proc.communicate(timeout=) 只在进程退出后拿输出，框架对被跑
+        内容零可见性（09-26 诊断实锚）。现改为双读线程持续排水 + 主循环轮询：
+
+        - 硬超时：started+timeout 到点 → kill_reason="timeout"（语义与旧版一致）
+        - 静默 watchdog：no_output_timeout_s>0 且 < timeout 时武装；最后一次
+          输出距今 ≥ 窗口 → 判卡死 → kill_reason="no_output(<窗口>)"。
+          窗口默认非 zig_test 300s / zig_test 900s（编译期合法静默更长，
+          见 _effective_no_output_timeout）。
 
         Returns:
-            (stdout, stderr, exit_code)
+            (stdout, stderr, exit_code, kill_reason)；正常结束 kill_reason=""
         """
-        try:
-            stdout_b, stderr_b = proc.communicate(timeout=timeout)
-            stdout = stdout_b.decode("utf-8", errors="replace") if stdout_b else ""
-            stderr = stderr_b.decode("utf-8", errors="replace") if stderr_b else ""
-            return (stdout, stderr, proc.returncode or 0)
-        except subprocess.TimeoutExpired:
-            self._kill_progressive_proc(proc, timeout)
+        started = time.monotonic()
+        last_output = started  # 读线程每次读到数据刷新（GIL 下 float 写原子，无需锁）
+        chunks_out: list[bytes] = []
+        chunks_err: list[bytes] = []
+
+        def _drain(pipe, chunks) -> None:
+            nonlocal last_output
             try:
-                stdout_b, stderr_b = proc.communicate(timeout=2)
-                stdout = stdout_b.decode("utf-8", errors="replace") if stdout_b else ""
-                stderr = stderr_b.decode("utf-8", errors="replace") if stderr_b else ""
-                return (stdout, stderr, -1)
-            except Exception:
-                return ("", "进程超时被强制终止", -1)
+                for data in pipe:
+                    chunks.append(data)
+                    last_output = time.monotonic()
+            except (OSError, ValueError):
+                pass  # 进程被杀后管道关闭属正常路径
+
+        readers = [
+            threading.Thread(target=_drain, args=(proc.stdout, chunks_out), daemon=True),
+            threading.Thread(target=_drain, args=(proc.stderr, chunks_err), daemon=True),
+        ]
+        for t in readers:
+            t.start()
+
+        kill_reason = ""
+        watchdog_armed = 0 < no_output_timeout_s < timeout
+        hard_deadline = started + timeout
+
+        while True:
+            try:
+                proc.wait(timeout=0.5)
+                break  # 正常退出（含测试脚本自退/自杀）
+            except subprocess.TimeoutExpired:
+                pass
+            now = time.monotonic()
+            if now >= hard_deadline:
+                kill_reason = "timeout"
+                self._kill_progressive_proc(proc, timeout)
+                break
+            if watchdog_armed and (now - last_output) >= no_output_timeout_s:
+                kill_reason = f"no_output({no_output_timeout_s})"
+                self._kill_progressive_proc(proc, timeout)
+                break
+
+        # 杀进程后管道关闭，读线程自然退出；限时 join 防止极端阻塞丢已读数据
+        for t in readers:
+            t.join(timeout=2.0)
+
+        stdout = b"".join(chunks_out).decode("utf-8", errors="replace")
+        stderr = b"".join(chunks_err).decode("utf-8", errors="replace")
+        exit_code = proc.returncode if proc.returncode is not None else -1
+        if kill_reason:
+            exit_code = -1  # 被框架杀死统一记 -1（对齐旧超时语义 → FAIL）
+        return (stdout, stderr, exit_code, kill_reason)
 
     def _kill_progressive_proc(
         self, proc: subprocess.Popen, timeout: int
@@ -484,6 +536,10 @@ class TestExecutor:
         m = result.metrics
 
         if result.exit_code == -1:
+            # zt-11 ①：区分硬超时与静默 watchdog 判卡死（两者都 FAIL，措辞区分根因）
+            if result.kill_reason.startswith("no_output"):
+                window = result.kill_reason.partition("(")[2].rstrip(")") or "?"
+                return f"no-output watchdog: {window}s 无输出判卡死"
             return "超时"
         if result.exit_code is not None and result.exit_code != 0:
             parts.append(f"exit={result.exit_code}")
@@ -546,6 +602,52 @@ class TestExecutor:
 
 
 # ── 辅助函数 ──────────────────────────────────────────────
+
+# zt-11 ②：run 级总预算默认值（秒）。生态内最坏全量之和 ≈ 数小时，1h 止损线
+# 覆盖所有常规门禁形态；项目可在 settings.total_budget_s 或 env 中覆盖。
+_TOTAL_BUDGET_DEFAULT_S = 3600
+
+
+def _env_int(name: str, default: int) -> int:
+    """读整型环境变量；缺失/非法回退默认值。"""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+# zt-11 ①：no-output watchdog 静默窗口默认值。
+# - line_count/custom/bench/test_protocols 类脚本套件通常持续打印进度行，静默 >300s
+#   几乎必为卡死；300s 足够保守（覆盖 python 启动 + 长静默 setup 的正常场景）。
+# - zig_test 套件（zig build test）编译期合法静默可达数分钟（冷缓存），900s 才安全；
+#   生态内 zig_test 套件 timeout 多为 120-420s，900s 窗口 < timeout 才武装 →
+#   实际不触发，zig_test 仍由硬超时兜底（诚实：watchdog 主攻脚本类套件）。
+_NO_OUTPUT_DEFAULT_S = 300
+_NO_OUTPUT_DEFAULT_ZIG_TEST_S = 900
+
+
+def _effective_no_output_timeout(suite: SuiteConfig) -> int:
+    """解析套件的 no-output watchdog 窗口：套件字段 > env > 按 parser 默认。
+
+    返回 0 = 禁用（显式 no_output_timeout_s: 0 或 env 置 0）。
+    """
+    if suite.no_output_timeout_s > 0:
+        return suite.no_output_timeout_s
+    env_raw = os.environ.get("ZIGTESTER_NO_OUTPUT_TIMEOUT_S")
+    if env_raw is not None:
+        try:
+            return max(0, int(env_raw))
+        except ValueError:
+            pass
+    return (
+        _NO_OUTPUT_DEFAULT_ZIG_TEST_S
+        if suite.parser == "zig_test"
+        else _NO_OUTPUT_DEFAULT_S
+    )
+
 
 def _build_cmd(suite: SuiteConfig) -> list[str]:
     """将 command 字符串解析为命令列表（先替换 ${VAR} 插件 env 引用）。"""
@@ -619,6 +721,7 @@ def run_project(
     no_build: bool = False,
     suite_filter: str | None = None,
     suite_args: str | None = None,
+    total_budget_s: int | None = None,
 ) -> ProjectResult:
     """执行单个项目的指定层级测试。
 
@@ -629,6 +732,9 @@ def run_project(
         no_build: 跳过构建步骤
         suite_filter: 仅运行指定名称的套件（可选）
         suite_args: 追加到命令尾部的非标准压测参数（如 "-n 10"），可选
+        total_budget_s: run 级总预算秒数（zt-11 ②）。None = 配置/env 回退
+            （settings.total_budget_s > ZIGTESTER_TOTAL_BUDGET_S > 默认 3600）；
+            ≤0 禁用。预算耗尽后剩余套件 SKIP——止损线，不改单套件语义。
 
     Returns:
         ProjectResult
@@ -642,6 +748,14 @@ def run_project(
 
     cfg = project.config
     work_dir = os.path.join(project.path, cfg.settings.work_dir or ".")
+
+    budget_s = total_budget_s
+    if budget_s is None:
+        if cfg.settings.total_budget_s > 0:
+            budget_s = cfg.settings.total_budget_s
+        else:
+            budget_s = _env_int("ZIGTESTER_TOTAL_BUDGET_S", _TOTAL_BUDGET_DEFAULT_S)
+    budget_deadline = (time.monotonic() + budget_s) if budget_s and budget_s > 0 else None
 
     # 确定要执行的层级
     target_levels = [l for l in levels if l in cfg.levels] if levels else [
@@ -695,16 +809,40 @@ def run_project(
                 ordered = filtered
 
             for suite in ordered:
-                # per_suite_only 套件：仅允许 --suite 显式运行。
+                # per_suite_only / zt-11 ⑤ 隐式单跑：仅允许 --suite 显式运行。
                 # --level 全量执行（suite_filter=None）时自动跳过，禁止一次跑全部压测。
-                if suite_filter is None and suite.per_suite_only:
+                if suite_filter is None and suite.solo_by_default:
+                    solo_msg = (
+                        "per_suite_only: 仅允许 --suite 单独运行（禁止 --level 全量压测）"
+                        if suite.per_suite_only
+                        else "timeout≥300s 默认单跑（zt-11 ⑤）：--suite 单跑，或 allow_full_run: true 解锁全量"
+                    )
                     result.suites.append(SuiteResult(
                         suite_name=suite.name,
                         level=level_name,
                         status="SKIP",
-                        message="per_suite_only: 仅允许 --suite 单独运行（禁止 --level 全量压测）",
+                        message=solo_msg,
                     ))
                     continue
+
+                # zt-11 ② 总预算止损：耗尽后本套件起全部 SKIP（含后续层级）
+                if budget_deadline is not None and time.monotonic() >= budget_deadline:
+                    print(
+                        f"[run] 总预算 {budget_s}s 耗尽，剩余套件跳过（zt-11 ②）",
+                        file=sys.stderr,
+                    )
+                    result.suites.append(SuiteResult(
+                        suite_name=suite.name,
+                        level=level_name,
+                        status="SKIP",
+                        message=f"总预算 {budget_s}s 耗尽（zt-11 ②）：剩余套件跳过",
+                    ))
+                    _skip_remaining_suites(
+                        result, cfg, target_levels, level_name, suite.name,
+                        skip_message="总预算耗尽: 跳过（zt-11 ②）",
+                    )
+                    result.finished_at = time.time()
+                    return result
 
                 # pre-flight：每个套件执行前自检插件环境（无插件时零开销）
                 if plugin_mgr is not None:
@@ -822,6 +960,7 @@ def _skip_remaining_suites(
     target_levels: list[str],
     failed_level: str,
     failed_suite: str,
+    skip_message: str = "环境自检失败: 跳过（环境未恢复）",
 ) -> None:
     """某套件环境自检失败后 — 同层级剩余套件 + 后续层级全部 SKIP。"""
     started = False
@@ -839,7 +978,7 @@ def _skip_remaining_suites(
                         suite_name=suite.name,
                         level=level_name,
                         status="SKIP",
-                        message="环境自检失败: 跳过（环境未恢复）",
+                        message=skip_message,
                     )
                 )
 

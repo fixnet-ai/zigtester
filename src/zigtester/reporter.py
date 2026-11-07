@@ -269,6 +269,22 @@ class Reporter:
         # 终端格式
         self._print_terminal(result)
 
+    @staticmethod
+    def print_timeout_audit(result: ProjectResult) -> None:
+        """打印 timeout 预算审计（zt-11 ③）——CLI 侧呈现，MCP 走结构化字段。
+
+        只在存在告警行时被调用（cli.py 判空后才调），审计不改任何行为，
+        是收紧预算的建议来源。
+        """
+        print(f"{_BOLD}⏱ timeout 审计（zt-11 ③，建议非判定）{_RESET}")
+        for row in result.timeout_audit:
+            print(
+                f"  {row.get('level', '')}/{row['suite']}: "
+                f"timeout={row['timeout_s']}s P95={row['p95_s']}s"
+            )
+            for w in row.get("warnings", []):
+                print(f"    - {w}")
+
     def print_workspace_results(self, ws: WorkspaceResult) -> None:
         """打印跨项目结果。"""
         if self.format == "json":

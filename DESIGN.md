@@ -243,6 +243,22 @@ run 选项：
 输出: {path: "/path/to/project/zigtester.yaml", created: true}
 ```
 
+## 门禁/超时体系（zt-11，2026-11-08 落地）
+
+09-26 诊断四缺陷（communicate 零输出可见性 / 无总预算 / timeout 按历史最坏值单调漂移 /
+300s 套件混进全量无人中止）→ 四机制：
+
+| # | 机制 | 落点 | 语义 |
+|---|------|------|------|
+| ① | no-output watchdog | `runner._wait_with_timeout_proc` 双读线程 + 主循环轮询 | 静默窗口默认非 zig_test 300s / zig_test 900s（编译期合法静默更长）；窗口 `< timeout` 才武装；触发 = FAIL + `kill_reason="no_output(<窗口>)"`；套件字段 `no_output_timeout_s` / env `ZIGTESTER_NO_OUTPUT_TIMEOUT_S` 覆盖（0 禁用） |
+| ② | run 级总预算 | `run_project(total_budget_s=)` | 默认 3600s；优先级 参数 > `settings.total_budget_s` > env `ZIGTESTER_TOTAL_BUDGET_S`；耗尽后剩余套件 SKIP（止损线，不改单套件硬超时语义）；≤0 禁用 |
+| ③ | timeout 审计 | `history.audit_timeouts`（save 后查库，含本次） | PASS 记录 P95/max vs 配置 timeout：冗余 >20× / 漂移 >10× / 曾触顶 三类告警；**建议非判定**，CLI `print_timeout_audit` / MCP `timeout_audit` 字段呈现 |
+| ⑤ | ≥300s 隐式单跑 | `SuiteConfig.solo_by_default` | `timeout ≥ 300` 且未设 `allow_full_run: true` → 全量执行时与 per_suite_only 同语义 SKIP；逃生门专给常跑门禁（kc all-tests/clashapi 等 14 套件已解锁，见各仓 yaml） |
+
+设计取舍：watchdog 主攻脚本类套件（line_count 等持续打印进度）；zig_test 套件静默编译
+合法、900s 默认窗口基本不武装，由硬超时兜底——诚实不假装覆盖。审计只建议不自动改
+预算（自动收紧会在冷缓存首跑误杀，见「运行/调试经验」）。
+
 ## 核心模块设计
 
 ### 1. scanner.py — 配置发现
