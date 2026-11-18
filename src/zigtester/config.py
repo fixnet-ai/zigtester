@@ -120,6 +120,10 @@ class SuiteConfig:
     thresholds: dict[str, Threshold] = field(default_factory=dict)
     resource_limits: ResourceLimits | None = None
     target: str | None = None    # 资源采集目标进程名（如 "test-engine"）；未声明时只采命令进程本身
+    artifact: str | None = None  # zt-12 新鲜度守卫：套件依赖的测试产物（glob 相对仓根，
+                                 # 如 "zig-out/*/zigtun-test"）。跑前校验存在且 mtime ≥
+                                 # git HEAD 提交时间，否则 ERROR（陈旧/缺失产物）——
+                                 # 堵 zt-10 新形态「构建成功但 install 产物陈旧」的假绿
     setup: LifecycleHook | None = None
     teardown: LifecycleHook | None = None
     # 资源采集透传字段(parse 时从 settings.resource_sampling + 套件覆盖落值)
@@ -317,6 +321,7 @@ def _parse_suite(
         thresholds=thresholds,
         resource_limits=_parse_resource_limits(raw.get("resource_limits")),
         target=raw.get("target"),
+        artifact=raw.get("artifact"),
         setup=_parse_lifecycle_hook(raw.get("setup")),
         teardown=_parse_lifecycle_hook(raw.get("teardown")),
         sampling_interval_s=rs.interval_s,
@@ -490,7 +495,10 @@ description: ""
 # 全局设置
 settings:
   work_dir: "."
-  build_command: "zig build"     # 可选：测试前自动构建
+  build_command: "zig build"     # 可选：测试前自动构建（zt-10：失败/超时即全套件 ERROR）。
+                                 # ⚠️ 套件跑 zig-out 测试二进制的项目**必须**让此命令
+                                 # 覆盖对应 install 步（如 "zig build test-cli"），否则
+                                 # 构建成功 ≠ 产物新鲜（zt-10 新形态假绿）
   timeout_default: 120            # 默认超时（秒）
   # env:                         # 全局环境变量
   #   ZIG_EXE: zig
@@ -506,6 +514,10 @@ levels:
   # functional:
   #   - name: "smoke-test"
   #     command: "python3 tests/test_smoke.py"
+  #     artifact: "zig-out/*/smoke-test"   # zt-12 新鲜度守卫（可选）：套件依赖的测试
+  #     # 产物（glob 相对仓根）。跑前校验存在且 mtime ≥ git HEAD 提交时间，陈旧即
+  #     # ERROR——堵「构建成功但 install 产物陈旧」的假绿。故意跑旧件：
+  #     # ZIGTESTER_SKIP_ARTIFACT_CHECK=1
   #     timeout: 60
 
   # performance:

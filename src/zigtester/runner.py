@@ -127,6 +127,19 @@ class TestExecutor:
         monitor: ResourceMonitor | None = None
 
         try:
+            # ── Phase 0: 产物新鲜度守卫（zt-12）──
+            # zt-10 假绿新形态（2026-11-19 zigtun 实案）：构建成功但 install 产物
+            # 陈旧（build_command 未覆盖该步 / 未配置）——套件对三周前旧二进制 PASS。
+            # 声明 artifact 的套件执行前校验：glob 最新匹配 mtime ≥ git HEAD 提交时间。
+            if suite.artifact is not None and os.environ.get("ZIGTESTER_SKIP_ARTIFACT_CHECK") != "1":
+                err = _check_artifact_fresh(suite.artifact, work_dir)
+                if err is not None:
+                    result.status = "ERROR"
+                    result.setup_error = err
+                    result.duration_ms = (time.time() - started) * 1000
+                    result.message = err
+                    return result
+
             # ── Phase 1: setup ──
             if suite.setup is not None and suite.setup.command is not None:
                 try:
@@ -1132,6 +1145,80 @@ def _wait_process_ready(name: str, timeout: int, interval: float) -> bool:
 
 class BuildFailure(Exception):
     """构建步骤失败/超时（zt-10 假绿防护：拒绝在陈旧二进制上跑套件）。"""
+
+
+def _check_artifact_fresh(pattern: str, work_dir: str) -> str | None:
+    """zt-12 产物新鲜度校验。陈旧/缺失返回错误消息；通过返回 None。
+
+    判据：产物 glob 最新匹配 mtime ≥ 构建输入（本仓 src/**/*.zig + build.zig +
+    build.zig.zon 各 path 依赖仓的 src）最新 mtime（-5s 容差）。
+    输入新于产物 = 有改动必然未编入产物（确定性陈旧）——「改完源码没重编就跑套件」
+    正是要抓的形态。不用 git 提交时间做锚：「先构建后提交」工作流恒误报，且
+    zig install 缓存命中不刷新产物 mtime；path 依赖仓改动同样使产物过期（本判据
+    一并覆盖，zigtun×zigstack 实案）。找不到构建输入（非 zig 仓）只查存在。
+    """
+    import glob as _glob
+
+    matches = [p for p in _glob.glob(os.path.join(work_dir, pattern), recursive=True) if os.path.isfile(p)]
+    if not matches:
+        return (
+            f"zt-12: 测试产物不存在: {pattern} — 先构建（或 artifact 声明写错路径）"
+        )
+    newest_art = max(os.path.getmtime(p) for p in matches)
+    inputs_newest = _build_inputs_newest_mtime(work_dir)
+    if inputs_newest is None:
+        return None  # 非 zig 仓形态：只查存在
+    if newest_art < inputs_newest - 5:
+        age_min = (inputs_newest - newest_art) / 60
+        return (
+            f"zt-12: 测试产物陈旧 — {pattern} 比构建输入（src/ 或 path 依赖仓）旧 "
+            f"{age_min:.0f} 分钟，有改动未编入产物，其上的 PASS 是假绿"
+            f"（zt-10 新形态：构建成功但 install 产物陈旧）。"
+            f"先重建（build_command / zig build <install 步>）；故意跑旧件可置 "
+            f"ZIGTESTER_SKIP_ARTIFACT_CHECK=1"
+        )
+    return None
+
+
+def _build_inputs_newest_mtime(work_dir: str) -> float | None:
+    """构建输入的最新 mtime（zt-12 判据锚）。
+
+    范围 = 本仓 src/**/*.zig + build.zig + build.zig.zon 中各 `.path` 依赖仓的
+    同款范围（zig 生态仓固定 src/ 形态）。零误报：输入变更必然应触发重编；「构建
+    后又改输入」的 mtime 晚于产物 = 确定陈旧。找不到任何输入返回 None（跳判据）。
+    """
+
+    def _scan_repo(root: str) -> float:
+        best = 0.0
+        src_dir = os.path.join(root, "src")
+        if os.path.isdir(src_dir):
+            for dirpath, _dirnames, filenames in os.walk(src_dir):
+                for fn in filenames:
+                    if fn.endswith(".zig"):
+                        try:
+                            best = max(best, os.path.getmtime(os.path.join(dirpath, fn)))
+                        except OSError:
+                            pass
+        bz = os.path.join(root, "build.zig")
+        if os.path.isfile(bz):
+            try:
+                best = max(best, os.path.getmtime(bz))
+            except OSError:
+                pass
+        return best
+
+    newest = _scan_repo(work_dir)
+    zon = os.path.join(work_dir, "build.zig.zon")
+    if os.path.isfile(zon):
+        try:
+            text = open(zon, encoding="utf-8", errors="replace").read()
+            for dep_dir in re.findall(r'\.path\s*=\s*"([^"]+)"', text):
+                dep_root = os.path.normpath(os.path.join(work_dir, dep_dir))
+                if os.path.isdir(os.path.join(dep_root, "src")):
+                    newest = max(newest, _scan_repo(dep_root))
+        except OSError:
+            pass
+    return newest if newest > 0 else None
 
 
 def _run_build(build_command: str, work_dir: str, timeout: int = 300) -> None:
