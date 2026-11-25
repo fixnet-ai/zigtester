@@ -223,6 +223,16 @@ class MetricExtractor:
             result["tests_failed"] = float(f)
             result["tests_skipped"] = float(s)
             result["tests_total"] = float(p + f + s)
+        # ⑦.5 缓存命中无计数行（Zig 0.17 cached 态连 run 行都不输出，如
+        #    "+- compile test safe native cached 45ms"；2026-11-25 kisstun
+        #    实锚——此前 fallthrough 记 1/1，计数失真）。记 cached_run=1，
+        #    计数保持 0（真实语义=本次未重跑，代码未变上次已绿）；判定
+        #    仍走 exit_code（cached+exit0 = PASS）。走到此分支即说明 ①-⑦
+        #    全 miss（stdout 无任何计数行），只差区分「cached 未跑」与「真 1/1」。
+        elif exit_code == 0 and re.search(
+            r"(?:compile|run)[ \t]+test[^\n]*\bcached\b", stdout
+        ):
+            result["cached_run"] = 1.0
         # ⑧ 无任何 test count 文本行 → 由 exit_code 驱动
         #    用于 Zig 0.16 --listen=- TAP 协议等不输出传统测试汇总的格式
         elif exit_code != 0:

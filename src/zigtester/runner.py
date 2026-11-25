@@ -574,6 +574,10 @@ class TestExecutor:
             if m.get("tests_failed", 0) > 0:
                 parts.append(f"{int(m['tests_failed'])} failed")
 
+        # cached_run：0.17 缓存命中态（代码未变未重跑），避免误导性的 "1/1 passed"
+        if m.get("cached_run", 0) == 1 and m.get("tests_total", 0) == 0:
+            parts.append("cached(未重跑, exit=0)")
+
         # bench 类指标
         tp = m.get("throughput_reqs_per_sec", 0)
         if tp > 0:
